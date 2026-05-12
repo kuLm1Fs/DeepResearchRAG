@@ -5,7 +5,7 @@ from core import get_logger, settings
 from retrieval import MultiPathRetriever
 from vectorstore import MilvusStore
 
-from ..templates import load_prompt
+from .templates import load_prompt
 
 logger = get_logger(__name__)
 
@@ -122,7 +122,7 @@ async def evaluate_relevance(state: dict) -> dict:
 
 async def generate_answer(state: dict) -> dict:
     """Generate answer using LLM with retrieved context."""
-    from ..llm import create_llm
+    from llm import create_llm
 
     query = state.get("query", "")
     results = state.get("retrieval_results", [])
@@ -149,7 +149,7 @@ async def generate_answer(state: dict) -> dict:
 
     try:
         if settings.llm_cache:
-            from ..llm.cache import CachedLLM
+            from llm.cache import CachedLLM
             cached_llm = CachedLLM(llm, cache_dir=settings.llm_cache_dir / settings.llm_provider)
             answer = await cached_llm.chat(messages)
         else:

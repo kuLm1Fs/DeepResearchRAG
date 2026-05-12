@@ -28,15 +28,16 @@
 
 ---
 
-### 第二轮：检索修复 + 基础设施 (19:29 - 进行中)
+### 第二轮：检索修复 + 基础设施 (19:29 - 19:44)
 
 **任务**: 修复 keyword search bug + 补充基础设施
 
 | 步骤 | 结果 |
 |------|------|
 | CC 写代码 | ✅ retriever 修复 + .env.example + CLI + cache.py + prompts |
-| Codex 测试 | ⏳ 等待中 |
-| Git commit | ⏳ 等待测试通过 |
+| Codex 测试 | 第一次失败（PYTHONPATH + venv 缺依赖）→ 我装依赖 → 重测通过 |
+| Codex 修复 | 修了 CLI 导出名、FileCache 接口名 |
+| Git commit | ✅ `0040224` — `feat(infra)` |
 
 **产出文件**:
 - `backend/src/retrieval/retriever.py` — 修复 keyword search
@@ -44,10 +45,44 @@
 - `backend/src/cli/main.py` — CLI 入口
 - `backend/src/core/cache.py` — 通用缓存模块
 - `backend/src/agent/templates/v1/*.txt` — Prompt 模板
+- `docs/api-docs.md` — API 文档
+
+**遇到的问题**:
+- venv 缺 pydantic-settings/structlog 等依赖 → 需手动安装
+- PYTHONPATH 未设置 → 测试需 `export PYTHONPATH=src`
 
 ---
 
-### 待办
+### 第三轮：前端组件 (19:45 - 20:36)
+
+**任务**: 前端组件完善（SourceCard/FilterBar/CompareView）+ TypeScript 类型
+
+| 步骤 | 结果 |
+|------|------|
+| CC 写代码 | ✅ 5 个文件（3 新建 + 2 更新） |
+| Codex 测试 | ✅ tsc + build 全部通过 |
+| Git commit | ✅ `6dd1e7f` — `feat(frontend)` |
+
+**产出文件**:
+- `frontend/src/types/index.ts` — 完整类型定义
+- `frontend/src/components/SourceCard.tsx` — 折叠式来源卡片
+- `frontend/src/components/FilterBar.tsx` — 过滤栏
+- `frontend/src/components/CompareView.tsx` — 多源对比视图
+- `frontend/src/components/SourcePanel.tsx` — 改用 SourceCard 渲染
+
+---
+
+### 整体进度
+
+| 模块 | 状态 | Commit |
+|------|------|--------|
+| 数据采集层 | ✅ 完成 | `5ac681e` |
+| 检索修复+基础设施 | ✅ 完成 | `0040224` |
+| 前端组件 | ✅ 完成 | `6dd1e7f` |
+| Prompt 模板 | ✅ 完成 | 含在 infra 中 |
+| API 文档 | ✅ 完成 | 含在 infra 中 |
+| Docker 验证 | ⏳ 待做 | |
+| 端到端测试 | ⏳ 待做 | |
 - [ ] 第二轮 Codex 测试
 - [ ] 第二轮 Git commit
 - [ ] 前端组件完善
