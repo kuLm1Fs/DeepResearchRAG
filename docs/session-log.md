@@ -130,17 +130,17 @@
 | 检索修复+基础设施 | ✅ 完成 | `0040224` |
 | 前端组件 | ✅ 完成 | `6dd1e7f` |
 | 配置加载 | ✅ 完成 | `3e8e4fc` |
+| LangGraph Agent | ✅ 完成 | `f718929` |
+| LangSmith Tracing | ✅ 完成 | `da422e0` |
 | Prompt 模板 | ✅ 完成 | 含在 infra 中 |
 | API 文档 | ✅ 完成 | 含在 infra 中 |
-| Docker 验证 | ⏳ 待做 | |
-| 端到端测试 | ⏳ 待做 | |
-| agent/graph.py | ✅ 完成 | `f718929` |
-| Docker 验证 | ⏳ 跳过 | 用户服务器上 |
-| 端到端测试 | ⏳ 待做 | |
+| seed_data.py | ⏳ 待做 | 需 Milvus |
+| evaluate_retrieval.py | ⏳ 待做 | 需 Milvus |
+| 端到端测试 | ⏳ 待做 | 需 Milvus |
 
-### 待办（按优先级）
-1. ~~实现 `agent/graph.py`（LangGraph graph 编译）~~ ✅
-2. 端到端测试（CLI 查询 → 返回答案）
+### 待办
+- seed_data.py + evaluate_retrieval.py（需服务器 Milvus）
+- 端到端测试（需服务器 Milvus）
 
 ---
 
