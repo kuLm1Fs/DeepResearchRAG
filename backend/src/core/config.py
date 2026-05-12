@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     llm_cache: bool = True
     log_level: str = "DEBUG"
 
+    # LangSmith
+    langchain_api_key: str = ""
+    langchain_tracing_v2: bool = False
+    langchain_project: str = "rag-news-intelligence"
+    langchain_endpoint: str = "https://api.smith.langchain.com"
+
     # Paths
     project_root: Path = _project_root
     data_dir: Path = project_root / "data"

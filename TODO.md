@@ -121,13 +121,13 @@
 
 ### 4.3 Agent 工作流
 
-- [ ] 定义 AgentState
-- [ ] 实现 retrieve 节点（多路召回）
-- [ ] 实现 evaluate 节点（评估相关性）
-- [ ] 实现 generate 节点（生成答案）
-- [ ] 实现 reflect 节点（自我反思）
-- [ ] 实现条件边（结果不够则重新检索）
-- [ ] 编译图：`graph.compile()`
+- [x] 定义 AgentState
+- [x] 实现 retrieve 节点（多路召回）
+- [x] 实现 evaluate 节点（评估相关性）
+- [x] 实现 generate 节点（生成答案）
+- [x] 实现 reflect 节点（自我反思）
+- [x] 实现条件边（结果不够则重新检索）
+- [x] 编译图：`graph.compile()`
 
 ### 4.4 Agent 验证
 

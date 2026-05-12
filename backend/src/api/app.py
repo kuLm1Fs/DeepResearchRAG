@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from core import configure_logging, get_logger, TraceIDMiddleware, settings
+from core import configure_logging, get_logger, TraceIDMiddleware, settings, setup_langsmith
 from .routes import router
 
 logger = get_logger(__name__)
@@ -14,6 +14,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     configure_logging()
     logger.info("app_starting", env=settings.env, debug=settings.debug)
+    setup_langsmith()
     yield
     logger.info("app_shutting_down")
 
