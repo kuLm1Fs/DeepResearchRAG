@@ -27,13 +27,13 @@ def compute_cache_key(texts: list[str]) -> str:
 )
 async def _call_embedding_api(texts: list[str]) -> list[list[float]]:
     """Call 火山引擎 embedding API with retry."""
-    url = settings.volc_engine_embedding_url
+    url = settings.volcengine_embedding_url
     headers = {
         "Authorization": f"Bearer {settings.volcengine_api_key}",
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "volcengine_public",
+        "model": settings.volcengine_embedding_model or "doubao-embedding",
         "input": texts,
     }
 

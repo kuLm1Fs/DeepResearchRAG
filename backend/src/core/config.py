@@ -28,7 +28,8 @@ class Settings(BaseSettings):
 
     # Embedding
     volcengine_api_key: str = ""
-    volc_engine_embedding_url: str = "https://open.volcengineapi.com/api/v1/embeddings"
+    volcengine_embedding_url: str = "https://aihubmix.com/v1/embeddings"
+    volcengine_embedding_model: str = "bge-large-zh"
 
     # Milvus
     milvus_host: str = "localhost"
