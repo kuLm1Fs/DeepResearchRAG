@@ -1,0 +1,20 @@
+Reflect on the generated answer for quality and accuracy.
+
+Original Question: {query}
+Generated Answer: {answer}
+
+Retrieved Sources:
+{sources}
+
+Check for:
+1. Factual accuracy - does the answer match the sources?
+2. Completeness - are all aspects of the question addressed?
+3. Citation accuracy - are sources correctly cited?
+4. Coherence - is the answer well-structured and clear?
+
+Return your assessment in JSON format:
+{{
+  "quality": "GOOD|FAIR|POOR",
+  "issues": ["list of any issues found"],
+  "suggestions": ["list of suggestions for improvement if any"]
+}}

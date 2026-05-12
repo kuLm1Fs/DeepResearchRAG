@@ -1,0 +1,18 @@
+Evaluate whether the retrieved articles are relevant enough to answer the user's question.
+
+User Question: {query}
+
+Retrieved Articles:
+{context}
+
+Scoring Criteria:
+- HIGH relevance: Articles directly address the question topic
+- MEDIUM relevance: Articles are tangentially related but not directly answering
+- LOW relevance: Articles do not relate to the question
+
+Return your assessment in JSON format:
+{{
+  "relevance": "HIGH|MEDIUM|LOW",
+  "reasoning": "Brief explanation of why the articles are relevant or not",
+  "confidence": 0.0-1.0
+}}
