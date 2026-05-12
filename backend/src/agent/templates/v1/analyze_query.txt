@@ -1,0 +1,11 @@
+Analyze the following user query and extract structured information.
+
+User Query: {query}
+
+Please identify:
+1. Intent (news_query, comparison, temporal_analysis, general)
+2. Keywords (list of important keywords)
+3. Language (zh or en)
+4. Requires multi-source (true/false)
+
+Respond in JSON format.

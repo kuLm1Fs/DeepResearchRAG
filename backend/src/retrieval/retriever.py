@@ -119,13 +119,13 @@ class MultiPathRetriever:
     def _keyword_search(self, query: str) -> list[dict[str, Any]]:
         """Keyword/fulltext search on title and content."""
         try:
-            # Try title match first
+            # 搜索 title 和 content 两个字段，使用 OR 条件
             results = self.store.query(
-                expr=f'title like "%{query}%"',
+                expr=f'title like "%{query}%" or content like "%{query}%"',
                 output_fields=["title", "content", "source", "language", "category", "published_at", "id"],
                 limit=self.keyword_limit,
             )
-            # Add dummy scores
+            # 添加默认分数
             for r in results:
                 r["score"] = 0.5
             return results
