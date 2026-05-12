@@ -32,8 +32,20 @@
 - **影响**: 代码可运行但类型不一致
 - **状态**: ⏳ 待确认是否需要添加
 
-### Issue 5: scripts/seed_data.py 和 evaluate_retrieval.py 未验证
-- **状态**: ⏳ 待测试
+### Issue 5: core/logging.py Processor 类型错误
+- **文件**: `backend/src/core/logging.py`
+- **问题**: `Processor(googlers=redact_sensitive)` 把类型别名当类实例化
+- **修复**: CC 改为 `redact_sensitive`（直接传函数），删除 Processor 导入
+- **状态**: ✅ 已修复
+
+### Issue 6: core/logging.py structlog.INFO 不存在
+- **文件**: `backend/src/core/logging.py`
+- **问题**: `getattr(structlog, settings.log_level.upper(), structlog.INFO)` 中 structlog 没有 INFO 属性
+- **修复**: CC 改为 `getattr(logging, settings.log_level.upper(), logging.INFO)`
+- **状态**: ✅ 已修复
+
+### Issue 7: scripts/seed_data.py 和 evaluate_retrieval.py 未验证
+- **状态**: ✅ 已验证通过
 
 ---
 

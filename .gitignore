@@ -65,4 +65,5 @@ minio_data/
 .coverage
 htmlcov/
 .mypy_cache/
-.ruff_cache/
+.ruff_cache/backend/.env.dev
+configs/.env.dev

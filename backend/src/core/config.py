@@ -1,10 +1,15 @@
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Dynamically resolve paths relative to this config file
+# config.py is at: backend/src/core/config.py → go up 4 levels to project root
+_project_root = Path(__file__).parent.parent.parent.parent
+_env_file = _project_root / "configs" / ".env.dev"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_env_file,
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
@@ -35,11 +40,11 @@ class Settings(BaseSettings):
     log_level: str = "DEBUG"
 
     # Paths
-    project_root: Path = Path(__file__).parent.parent.parent
+    project_root: Path = _project_root
     data_dir: Path = project_root / "data"
     llm_cache_dir: Path = data_dir / "llm_cache"
     eval_results_dir: Path = data_dir / "eval_results"
-    prompt_dir: Path = project_root / "src" / "agent" / "templates"
+    prompt_dir: Path = project_root / "backend" / "src" / "agent" / "templates"
 
     # Prompt versioning
     prompt_version: str = "v1"
@@ -50,3 +55,13 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+if __name__ == "__main__":
+    print(f"ENV={settings.env}")
+    print(f"DEBUG={settings.debug}")
+    print(f"LLM_PROVIDER={settings.llm_provider}")
+    print(f"DEEPSEEK_API_KEY={'set' if settings.deepseek_api_key else 'MISSING'}")
+    print(f"VOLCENGINE_API_KEY={'set' if settings.volcengine_api_key else 'MISSING'}")
+    print(f"MILVUS_HOST={settings.milvus_host}")
+    print(f"MILVUS_PORT={settings.milvus_port}")
