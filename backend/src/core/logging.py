@@ -11,10 +11,14 @@ SENSITIVE_PATTERNS = [
 ]
 
 
-def redact_sensitive(value: str) -> str:
-    for pattern, replacement in SENSITIVE_PATTERNS:
-        value = pattern.sub(replacement, value)
-    return value
+def redact_sensitive(logger, method_name, event_dict):
+    """Structlog processor: redact sensitive patterns from event dict."""
+    for key, value in event_dict.items():
+        if isinstance(value, str):
+            for pattern, replacement in SENSITIVE_PATTERNS:
+                value = pattern.sub(replacement, value)
+            event_dict[key] = value
+    return event_dict
 
 
 def add_timestamp(logger, method_name, event_dict):

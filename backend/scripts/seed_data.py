@@ -53,7 +53,7 @@ def main():
 
         for i in tqdm(range(0, len(dataset), batch_size), desc="Seeding batches", unit="batch"):
             batch = dataset[i:i+batch_size]
-            texts = [item['text'] for item in batch]
+            texts = batch['text']
 
             try:
                 # 获取 embeddings
@@ -61,16 +61,16 @@ def main():
 
                 # 准备记录
                 records = []
-                for item, embedding in zip(batch, embeddings):
+                for j in range(len(texts)):
                     records.append({
-                        "title": item["text"][:100],  # 取前100字符作为标题
-                        "content": item["text"],
+                        "title": texts[j][:100],
+                        "content": texts[j],
                         "source": "ag_news",
                         "language": "en",
-                        "category": ["World", "Sports", "Business", "Sci/Tech"][item["label"]],
+                        "category": ["World", "Sports", "Business", "Sci/Tech"][batch['label'][j]],
                         "published_at": 0,
                         "content_hash": "",
-                        "embedding": embedding,
+                        "embedding": embeddings[j],
                     })
 
                 store.insert(records)
