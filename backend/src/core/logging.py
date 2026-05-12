@@ -1,6 +1,6 @@
+import logging
 import re
 import structlog
-from structlog.types import Processor
 
 from .config import settings
 
@@ -32,11 +32,11 @@ def configure_logging():
             structlog.processors.StackInfoRenderer(),
             structlog.dev.set_exc_info,
             structlog.processors.TimeStamper(fmt="iso"),
-            Processor(googlers=redact_sensitive),  # type: ignore
+            redact_sensitive,
             structlog.dev.ConsoleRenderer(),
         ],
         wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(structlog, settings.log_level.upper(), structlog.INFO)
+            getattr(logging, settings.log_level.upper(), logging.INFO)
         ),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),
