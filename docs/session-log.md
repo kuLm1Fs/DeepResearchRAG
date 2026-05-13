@@ -330,3 +330,117 @@ cd backend && PYTHONPATH=src .venv/bin/python scripts/import_rss_pipeline.py --l
 ```bash
 .venv/bin/python -m pip install trafilatura minio
 ```
+
+---
+
+## 2026-05-13 会话记录（续）— Phase 7-8 扩展
+
+### 会话概要
+- **时间**: 21:26 - 23:05
+- **参与者**: clawpy (PM) + Claude Code (CC) + Codex（部分任务）
+- **工作流**: CC写代码 → PM验证 → git commit
+
+### 第六轮：错误分级 + 生产环境验证 (21:30 - 21:45)
+
+**任务**: 实现四级错误分类 + 生产环境启动检查
+
+| 步骤 | 结果 |
+|------|------|
+| CC 写代码 | ✅ 创建/更新 core/errors.py |
+| CC 写代码 | ✅ 更新 api/app.py 添加 startup 验证 |
+| PM 验证 | ✅ 导入测试通过（ErrorLevel/handle_error） |
+| Git commit | ✅ `8ce8e9a` — `feat: 完成 Phase 7-8 扩展功能` |
+
+**产出文件**:
+- `backend/src/core/errors.py` — RAGError, ErrorLevel (IGNORABLE/HANDLED/CRITICAL/NEEDS_ATTENTION), handle_error
+
+### 第七轮：LLM 扩展 (21:45 - 22:00)
+
+**任务**: 实现 OpenAI 和 Qwen 备选客户端
+
+| 步骤 | 结果 |
+|------|------|
+| CC 写代码 | ✅ 创建 base.py, openai_client.py, qwen_client.py |
+| PM 修复 | ✅ OpenAIClient 延迟初始化（避免无 key 时构造失败） |
+| PM 验证 | ✅ 导入 + 实例化测试通过 |
+| Git commit | ✅ 包含在 `8ce8e9a` |
+
+**产出文件**:
+- `backend/src/llm/base.py` — BaseLLM 抽象类 + LLMResponse
+- `backend/src/llm/openai_client.py` — OpenAI GPT 系列客户端
+- `backend/src/llm/qwen_client.py` — Qwen 通义千问客户端
+
+### 第八轮：Agent 扩展 (22:00 - 22:20)
+
+**任务**: 历史上下文 + 多源对比 + 深度反思
+
+| 步骤 | 结果 |
+|------|------|
+| CC 写代码 | ✅ 更新 state.py, nodes.py, graph.py |
+| PM 验证 | ✅ 导入测试通过（AgentState 新增字段 + compare_sources/self_reflect） |
+| Git commit | ✅ 包含在 `8ce8e9a` |
+
+**产出文件**:
+- `backend/src/agent/state.py` — 新增 conversation_history, use_history
+- `backend/src/agent/nodes.py` — compare_sources 节点, self_reflect 升级
+
+### 第九轮：召回扩展 (22:20 - 22:40)
+
+**任务**: 时间衰减加权 + 来源质量加权
+
+| 步骤 | 结果 |
+|------|------|
+| CC 写代码 | ✅ 创建 retrieval/boost.py + 更新 retriever.py |
+| CC 验证 | ✅ 时间衰减测试通过（7天前 0.851, 30天前 0.500, 365天前 0.100） |
+| Git commit | ✅ 包含在 `8ce8e9a` |
+
+**产出文件**:
+- `backend/src/retrieval/boost.py` — calculate_time_decay, calculate_source_quality, boost_results
+
+### 第十轮：前端扩展 (22:40 - 23:00)
+
+**任务**: Dashboard + HistoryPanel
+
+| 步骤 | 结果 |
+|------|------|
+| CC 写代码 | ✅ 创建 Dashboard.tsx, HistoryPanel.tsx |
+| PM 修复 | ✅ 移除 client.ts 未使用的 StatsData 导入 |
+| PM 验证 | ✅ npm run build 通过 |
+| Git commit | ✅ 包含在 `8ce8e9a` |
+
+**产出文件**:
+- `frontend/src/components/Dashboard.tsx` — 数据概览仪表盘
+- `frontend/src/components/HistoryPanel.tsx` — 查询历史记录
+- `frontend/src/api/client.ts` — getStats 扩展
+- `frontend/src/types/index.ts` — HistoryItem, StatsData 类型
+
+### 整体进度
+
+| 模块 | 状态 | Commit |
+|------|------|--------|
+| 错误分级 | ✅ 完成 | `8ce8e9a` |
+| LLM 扩展 | ✅ 完成 | `8ce8e9a` |
+| Agent 扩展 | ✅ 完成 | `8ce8e9a` |
+| 召回扩展 | ✅ 完成 | `8ce8e9a` |
+| 前端扩展 | ✅ 完成 | `8ce8e9a` |
+| RSS 定时调度 | ⏳ 用户跳过 | — |
+| Reddit 采集器 | ⏳ 用户跳过 | — |
+| 部署文档 | ⏳ 待做 | — |
+
+### 提交: `8ce8e9a` — feat: 完成 Phase 7-8 扩展功能
+
+**改动文件** (24 files):
+- `backend/src/core/errors.py` — 错误分级
+- `backend/src/llm/base.py, openai_client.py, qwen_client.py` — LLM 客户端
+- `backend/src/agent/state.py, nodes.py, graph.py` — Agent 扩展
+- `backend/src/retrieval/boost.py` — 时间衰减+来源质量加权
+- `backend/src/api/app.py` — 生产环境验证
+- `frontend/src/components/Dashboard.tsx` — 数据仪表盘
+- `frontend/src/components/HistoryPanel.tsx` — 查询历史
+- `frontend/src/api/client.ts` — getStats 扩展
+- `frontend/src/types/index.ts` — 新增类型
+- `frontend/src/App.tsx` — 集成新组件
+
+### 用户跳过项目
+- RSS 定时调度 / Reddit 采集器 / 爬虫
+- 部署文档 / CI/CD / Nginx
