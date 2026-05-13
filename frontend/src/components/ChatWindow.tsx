@@ -1,17 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-}
-
-interface Source {
-  title: string
-  content: string
-  source: string
-  category: string
-  score: number
-}
+import type { Message, Source } from '../types'
 
 interface ChatWindowProps {
   onSourcesUpdate: (sources: Source[]) => void
@@ -31,6 +19,34 @@ export default function ChatWindow({ onSourcesUpdate }: ChatWindowProps) {
     scrollToBottom()
   }, [messages])
 
+  const appendAssistantMessage = (content: string, isError = false) => {
+    setMessages(prev => [...prev, { role: 'assistant', content, isError }])
+  }
+
+  const updateLastAssistantMessage = (content: string, isError = false) => {
+    setMessages(prev => {
+      const newMessages = [...prev]
+      const lastIndex = newMessages.length - 1
+
+      if (lastIndex >= 0 && newMessages[lastIndex].role === 'assistant') {
+        newMessages[lastIndex] = { role: 'assistant', content, isError }
+        return newMessages
+      }
+
+      return [...prev, { role: 'assistant', content, isError }]
+    })
+  }
+
+  const formatErrorMessage = (err: unknown) => {
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      return 'Request timed out. Please try again.'
+    }
+    if (err instanceof Error) {
+      return err.message
+    }
+    return 'Unknown error'
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || loading) return
@@ -47,50 +63,62 @@ export default function ChatWindow({ onSourcesUpdate }: ChatWindowProps) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ query: userMessage, top_k: 5, stream: true }),
+        signal: AbortSignal.timeout(30000),
       })
 
-      const reader = response.body?.getReader()
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error')
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
+
+      if (!response.body) {
+        throw new Error('Response body is empty')
+      }
+
+      const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let assistantMessage = ''
+      let buffer = ''
 
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }])
+      appendAssistantMessage('')
 
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
 
-          const chunk = decoder.decode(value)
-          const lines = chunk.split('\n')
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const event = JSON.parse(line.slice(6))
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const event = JSON.parse(line.slice(6))
 
-                if (event.type === 'sources') {
-                  onSourcesUpdate(event.data)
-                } else if (event.type === 'token') {
-                  assistantMessage += event.data
-                  setMessages(prev => {
-                    const newMessages = [...prev]
-                    newMessages[newMessages.length - 1] = {
-                      role: 'assistant',
-                      content: assistantMessage,
-                    }
-                    return newMessages
-                  })
-                }
-              } catch (err) {
-                // Skip malformed JSON
+              if (event.type === 'sources') {
+                onSourcesUpdate(event.data)
+              } else if (event.type === 'token') {
+                assistantMessage += event.data
+                updateLastAssistantMessage(assistantMessage)
+              } else if (event.type === 'done' && !assistantMessage) {
+                assistantMessage = event.data?.answer || ''
+                updateLastAssistantMessage(assistantMessage)
+              } else if (event.type === 'error') {
+                throw new Error(event.data || 'Streaming error')
               }
+            } catch (err) {
+              if (err instanceof SyntaxError) {
+                console.warn('[DEBUG] Skipping malformed SSE payload:', line)
+                continue
+              }
+              throw err
             }
           }
         }
       }
     } catch (err) {
-      console.error('Query failed:', err)
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, something went wrong.' }])
+      console.error('[DEBUG] Query failed:', err)
+      updateLastAssistantMessage(`Error: ${formatErrorMessage(err)}`, true)
     } finally {
       setLoading(false)
     }
@@ -112,6 +140,8 @@ export default function ChatWindow({ onSourcesUpdate }: ChatWindowProps) {
               className={`max-w-xl px-4 py-3 rounded-lg ${
                 msg.role === 'user'
                   ? 'bg-primary text-white'
+                  : msg.isError
+                  ? 'bg-red-100 text-red-700 border border-red-300'
                   : 'bg-gray-100 text-gray-900'
               }`}
             >

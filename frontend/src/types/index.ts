@@ -21,12 +21,15 @@ export interface Article {
 export interface Message {
   role: 'user' | 'assistant'
   content: string
+  isError?: boolean
 }
 
 // 查询请求类型
 export interface QueryRequest {
   query: string
-  filters?: FilterState
+  top_k?: number
+  language?: string
+  category?: string
   stream?: boolean
 }
 
@@ -54,4 +57,32 @@ export interface Source {
   score: number
   url?: string
   published_at?: number
+}
+
+// 健康检查响应类型
+export interface HealthResponse {
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
+  milvus_connected: boolean
+  llm_provider: string
+}
+
+// 数据导入触发请求类型
+export interface IngestTriggerRequest {
+  source?: 'rss' | 'hackernews' | 'huggingface'
+  limit?: number
+}
+
+// 数据导入触发响应类型
+export interface IngestTriggerResponse {
+  status: 'started' | 'error' | string
+  source: string | null
+  message: string
+  articles_collected: number
+}
+
+// 数据导入状态响应类型
+export interface IngestStatusResponse {
+  total_articles: number
+  sources: Record<string, number>
+  collectors: string[]
 }
