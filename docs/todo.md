@@ -235,8 +235,8 @@
 
 - [x] 实现 RSS 采集器（8个中英文源：TechCrunch、The Verge、ArsTechnica、BBC、Reuters、36kr、少数派、钛媒体、ifanr）
 - [x] 实现 Hacker News API 采集器
-- [ ] RSS 全文抓取（trafilatura）— **用户明确要求**
-- [ ] RSS 数据导入 Milvus（目前只有 ag_news 1000条）
+- [x] RSS 全文抓取（trafilatura）— **用户明确要求**
+- [x] RSS 数据导入 Milvus（目前只有 ag_news 1000条）
 - [ ] RSS 定时采集调度
 - [ ] 实现 Reddit API 采集器
 - [ ] 实现 Scrapy 爬虫（中文字站）

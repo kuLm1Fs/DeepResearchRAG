@@ -289,3 +289,44 @@
 **更新文件**:
 - `docs/todo.md` — Phase 7.2 勾选 `[x]`
 - `docs/session-log.md` — 本轮记录
+
+---
+
+### 第五轮：RSS 全文采集 + MinIO + Chunk + Milvus 导入 (10:20 - 10:35)
+
+**任务**: 完成 `backend/scripts/import_rss_pipeline.py`，整合 RSS → MinIO → Chunk → Milvus 全流程
+
+| 步骤 | 结果 |
+|------|------|
+| CC 写代码 | ✅ 创建 5 个新文件 + 修改 3 个现有文件 |
+| CC 验证 | ✅ dry-run 测试通过，语法检查通过 |
+| Git commit | ✅ `f437b49` — `feat(ingestion)` |
+
+**新增产出文件**:
+- `backend/scripts/import_rss_pipeline.py` — 主脚本，RSS → MinIO → Chunk → Milvus
+- `backend/src/ingestion/chunker.py` — 按段落切分文章为 chunk（固定头部 + 正文片段）
+- `backend/src/storage/minio_client.py` — MinIO 存储客户端（支持默认值从 settings 读取）
+- `backend/src/vectorstore/chunk_store.py` — Milvus news_chunks collection 操作封装
+- `backend/src/storage/__init__.py` — 导出 MinioStore
+
+**修改文件**:
+- `backend/src/core/config.py` — 新增 MinIO 配置项（host/port/access_key/secret_key/bucket）
+- `backend/src/vectorstore/__init__.py` — 导出 ChunkStore
+- `backend/src/storage/minio_client.py` — 构造函数支持默认值，新增 stats() 方法
+- `backend/src/vectorstore/chunk_store.py` — 新增 upsert_chunk() 和 stats() 方法
+
+**关键修改说明**:
+- `MinioStore.__init__()` 改为可选参数，默认从 `settings` 读取（host/port/access_key/secret_key/bucket）
+- `ChunkStore.insert_chunks()` 批量插入，新增 `upsert_chunk()` 单条包装
+- `ChunkStore.stats()` 和 `MinioStore.stats()` 返回统计字符串
+- `import_rss_pipeline.py` 的 `process_articles()` 依次调用：MinIO 上传 → chunk_article() 切分 → embed_texts_async() → ChunkStore.upsert_chunk()
+
+**测试命令**:
+```bash
+cd backend && PYTHONPATH=src .venv/bin/python scripts/import_rss_pipeline.py --limit 5 --sources techcrunch,bbc
+```
+
+**依赖安装**（如遇导入错误）:
+```bash
+.venv/bin/python -m pip install trafilatura minio
+```
