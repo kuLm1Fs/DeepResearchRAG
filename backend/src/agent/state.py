@@ -14,4 +14,5 @@ class AgentState(TypedDict, total=False):
     sources: list[dict]                  # Source citations
     reflection: dict[str, Any]           # Self-reflection result
     iteration: int                      # Current iteration count
+    top_k: int                          # Number of results to retrieve
     error: str | None                    # Error message if any

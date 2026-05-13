@@ -57,3 +57,22 @@ class SSEDoneEvent(BaseModel):
 class SSEErrorEvent(BaseModel):
     type: str = "error"
     data: str
+
+
+# Ingest endpoint models
+class IngestTriggerRequest(BaseModel):
+    source: str | None = Field(default=None, description="Specific collector name, None for all")
+    limit: int | None = Field(default=None, description="Limit number of articles to collect")
+
+
+class IngestTriggerResponse(BaseModel):
+    status: str
+    source: str | None
+    message: str
+    articles_collected: int = 0
+
+
+class IngestStatusResponse(BaseModel):
+    total_articles: int
+    sources: dict[str, int]
+    collectors: list[str]

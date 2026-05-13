@@ -65,6 +65,7 @@ async def run_agent(query: str, trace_id: str = "", top_k: int = 5) -> dict:
     initial_state = {
         "query": query,
         "trace_id": trace_id,
+        "top_k": top_k,
         "iteration": 0,
         "error": None,
     }

@@ -121,7 +121,13 @@ async def evaluate_relevance(state: dict) -> dict:
 
 
 async def generate_answer(state: dict) -> dict:
-    """Generate answer using LLM with retrieved context."""
+    """Generate answer using LLM with retrieved context.
+
+    NOTE: Streaming support requires refactoring the agent workflow to return
+    an async generator instead of a dict. The current implementation collects
+    the full answer before returning. For true streaming, the SSE endpoint would
+    need to yield from stream_chat() directly.
+    """
     from llm import create_llm
 
     query = state.get("query", "")

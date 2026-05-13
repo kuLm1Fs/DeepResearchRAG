@@ -5,7 +5,7 @@ import json
 from core import get_logger, settings
 from vectorstore import MilvusStore
 
-from .models import QueryRequest, QueryResponse, StatsResponse, HealthResponse, Source
+from .models import QueryRequest, QueryResponse, StatsResponse, HealthResponse, Source, IngestTriggerRequest, IngestTriggerResponse, IngestStatusResponse
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -136,3 +136,90 @@ async def health_check():
         milvus_connected=milvus_connected,
         llm_provider=settings.llm_provider,
     )
+
+
+@router.post("/ingest/trigger", response_model=IngestTriggerResponse)
+async def ingest_trigger(request: IngestTriggerRequest):
+    """
+    Trigger data ingestion from specified source or all sources.
+
+    This is an async trigger - collection happens in background.
+    """
+    from ingestion import Pipeline
+
+    try:
+        pipeline = Pipeline()
+        pipeline.register_defaults()
+
+        collector_name = request.source
+        articles_collected = 0
+
+        if collector_name:
+            # Trigger specific collector
+            if collector_name not in pipeline.list_collectors():
+                return IngestTriggerResponse(
+                    status="error",
+                    source=collector_name,
+                    message=f"Collector '{collector_name}' not found",
+                )
+            articles = list(pipeline.collect_one(collector_name, limit=request.limit))
+        else:
+            # Trigger all collectors
+            articles = list(pipeline.collect_all(limit=request.limit))
+
+        articles_collected = len(articles)
+        logger.info("ingestion_completed", source=collector_name, articles=articles_collected)
+
+        return IngestTriggerResponse(
+            status="started",
+            source=collector_name,
+            message=f"Collected {articles_collected} articles",
+            articles_collected=articles_collected,
+        )
+    except Exception as e:
+        logger.error("ingest_trigger_failed", error=str(e))
+        return IngestTriggerResponse(
+            status="error",
+            source=request.source,
+            message=f"Ingestion failed: {e}",
+        )
+
+
+@router.get("/ingest/status", response_model=IngestStatusResponse)
+async def ingest_status():
+    """
+    Get current ingestion status and data statistics.
+    """
+    from ingestion import Pipeline
+
+    try:
+        pipeline = Pipeline()
+        pipeline.register_defaults()
+
+        store = MilvusStore()
+        total = store.count()
+
+        # Get source breakdown from sample
+        sample_results = store.query(expr="id >= 0", limit=1000)
+        sources: dict[str, int] = {}
+        for r in sample_results:
+            source = r.get("source", "unknown")
+            sources[source] = sources.get(source, 0) + 1
+
+        # Estimate total per source
+        if len(sample_results) > 0 and total > 0:
+            ratio = total / len(sample_results)
+            sources = {k: int(v * ratio) for k, v in sources.items()}
+
+        return IngestStatusResponse(
+            total_articles=total,
+            sources=sources,
+            collectors=pipeline.list_collectors(),
+        )
+    except Exception as e:
+        logger.error("ingest_status_failed", error=str(e))
+        return IngestStatusResponse(
+            total_articles=0,
+            sources={},
+            collectors=[],
+        )
