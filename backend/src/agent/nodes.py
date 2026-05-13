@@ -55,68 +55,199 @@ def format_sources(results: list[dict]) -> list[dict]:
 
 
 async def analyze_query(state: dict) -> dict:
-    """Analyze query to determine intent and strategy."""
+    """用 LLM 分析查询意图、关键词和子查询。"""
+    from llm import create_llm
+
     query = state.get("query", "")
     logger.info("analyzing_query", query=query)
 
-    # For MVP, we do simple analysis
-    # Full version would use LLM for structured output
-    parsed = {
-        "intent": "news_query",
-        "keywords": query.split(),
-        "language": "en" if any(c.isascii() and c.isalpha() for c in query) else "zh",
+    llm = create_llm(
+        provider=settings.llm_provider,
+        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
+        model=settings.llm_model,
+    )
+
+    prompt = load_prompt("analyze_query", query=query)
+    messages = [{"role": "user", "content": prompt}]
+
+    try:
+        response = await llm.chat(messages)
+        parsed = json.loads(response.strip())
+    except Exception as e:
+        logger.warning("analyze_query_llm_failed", error=str(e))
+        # fallback
+        parsed = {
+            "intent": "factual",
+            "rewritten_query": query,
+            "sub_queries": [],
+            "keywords": query.split(),
+        }
+
+    # 构建检索 query 列表
+    search_queries = [parsed.get("rewritten_query", query)]
+    search_queries.extend(parsed.get("sub_queries", []))
+
+    return {
+        "parsed_query": parsed,
+        "search_queries": search_queries,
     }
 
-    return {"parsed_query": parsed, "search_strategy": "multi_path"}
 
-
-async def retrieve(state: dict) -> dict:
-    """Execute multi-path retrieval."""
+async def plan_retrieval(state: dict) -> dict:
+    """根据分析结果规划检索策略。"""
+    parsed = state.get("parsed_query", {})
     query = state.get("query", "")
     top_k = state.get("top_k", 5)
 
-    logger.info("retrieving", query=query, top_k=top_k)
+    search_queries = state.get("search_queries", [query])
+
+    # 根据意图类型调整检索参数
+    intent = parsed.get("intent", "factual")
+    if intent == "analysis":
+        per_query = 5  # 分析类需要更多材料
+        total = top_k * 2
+    elif intent == "comparison":
+        per_query = 4
+        total = top_k * 2
+    else:
+        per_query = 3
+        total = top_k
+
+    logger.info(
+        "planning_retrieval",
+        intent=intent,
+        num_queries=len(search_queries),
+        per_query=per_query,
+        total=total,
+    )
+
+    return {
+        "search_plan": {
+            "queries": search_queries,
+            "per_query": per_query,
+            "total": total,
+        },
+    }
+
+
+async def retrieve(state: dict) -> dict:
+    """执行多路多轮检索。"""
+    search_plan = state.get("search_plan", {})
+    queries = search_plan.get("queries", [state.get("query", "")])
+    per_query = search_plan.get("per_query", 3)
+    total = search_plan.get("total", state.get("top_k", 5))
+
+    logger.info("retrieving", num_queries=len(queries), per_query=per_query, total=total)
 
     store = MilvusStore()
     retriever = MultiPathRetriever(store)
 
-    results = retriever.retrieve(query, top_k=top_k * 2)  # Get more for re-ranking
+    all_results = []
+    seen_titles = set()
+
+    for q in queries:
+        results = await retriever.retrieve(q, top_k=per_query)
+        for r in results:
+            title = r.get("title", "")
+            if title not in seen_titles:
+                seen_titles.add(title)
+                all_results.append(r)
+
+    # 按 score 排序，取 top total
+    all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+    top_results = all_results[:total]
+
+    logger.info("retrieval_complete", total_results=len(all_results), returned=len(top_results))
 
     return {
-        "retrieval_results": results,
-        "filtered_results": results[:top_k],
+        "retrieval_results": top_results,
+        "filtered_results": top_results[:state.get("top_k", 5)],
     }
 
 
 async def evaluate_relevance(state: dict) -> dict:
-    """Evaluate retrieval results relevance."""
+    """用 LLM 评估检索结果质量。"""
+    from llm import create_llm
+
     results = state.get("retrieval_results", [])
     query = state.get("query", "")
 
     if not results:
-        logger.warning("no_results_to_evaluate")
-        return {"error": "No results to evaluate"}
+        return {
+            "reflection": {
+                "relevance": "LOW",
+                "coverage": 0,
+                "action": "proceed",
+                "gaps": ["No results"],
+            },
+        }
 
-    # Format context for evaluation
-    context = format_context(results[:5])  # Top 5 for evaluation
-
-    # For MVP, use simple heuristic
-    # Full version would use LLM
-    avg_score = sum(r.get("score", 0) for r in results[:5]) / min(5, len(results))
-    relevance = "HIGH" if avg_score > 0.6 else "MEDIUM" if avg_score > 0.4 else "LOW"
-
-    logger.info("relevance_evaluated",
-        query=query,
-        relevance=relevance,
-        avg_score=avg_score,
+    llm = create_llm(
+        provider=settings.llm_provider,
+        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
+        model=settings.llm_model,
     )
 
-    return {
-        "reflection": {
+    context = format_context(results[:5])
+    prompt = load_prompt("evaluate_relevance", query=query, context=context)
+    messages = [{"role": "user", "content": prompt}]
+
+    try:
+        response = await llm.chat(messages)
+        reflection = json.loads(response.strip())
+    except Exception as e:
+        logger.warning("evaluate_relevance_llm_failed", error=str(e))
+        # fallback
+        avg_score = sum(r.get("score", 0) for r in results[:5]) / min(5, len(results))
+        relevance = "HIGH" if avg_score > 0.6 else "MEDIUM" if avg_score > 0.4 else "LOW"
+        reflection = {
             "relevance": relevance,
-            "avg_score": avg_score,
-            "reasoning": f"Average score: {avg_score:.3f}",
+            "coverage": int(avg_score * 100),
+            "gaps": [],
+            "action": "proceed",
+            "re_search_query": "",
         }
+
+    logger.info(
+        "relevance_evaluated",
+        relevance=reflection.get("relevance"),
+        coverage=reflection.get("coverage"),
+        action=reflection.get("action"),
+    )
+
+    return {"reflection": reflection}
+
+
+async def re_search(state: dict) -> dict:
+    """用补充 query 进行额外检索，合并结果。"""
+    reflection = state.get("reflection", {})
+    re_search_query = reflection.get("re_search_query", "")
+
+    logger.info("re_searching", query=re_search_query)
+
+    if not re_search_query:
+        return {"re_search_count": state.get("re_search_count", 0) + 1}
+
+    store = MilvusStore()
+    retriever = MultiPathRetriever(store)
+
+    new_results = await retriever.retrieve(re_search_query, top_k=5)
+
+    # 合并去重
+    existing = {r.get("title") for r in state.get("retrieval_results", [])}
+    combined = list(state.get("retrieval_results", []))
+    for r in new_results:
+        if r.get("title") not in existing:
+            combined.append(r)
+
+    combined.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    logger.info("re_search_complete", new_results=len(new_results), combined=len(combined))
+
+    return {
+        "retrieval_results": combined[:15],
+        "filtered_results": combined[:state.get("top_k", 5)],
+        "re_search_count": state.get("re_search_count", 0) + 1,
     }
 
 

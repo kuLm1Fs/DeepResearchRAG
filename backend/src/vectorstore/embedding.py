@@ -11,7 +11,7 @@ from core import get_logger, settings
 logger = get_logger(__name__)
 
 EMBEDDING_DIM = 1024
-BATCH_SIZE = 50
+BATCH_SIZE = 16
 
 
 def compute_cache_key(texts: list[str]) -> str:

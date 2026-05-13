@@ -7,31 +7,30 @@ from core import get_logger
 from .state import AgentState
 from .nodes import (
     analyze_query,
+    plan_retrieval,
+    retrieve,
     evaluate_relevance,
-    format_sources,
     generate_answer,
     generate_answer_stream,
-    retrieve,
     self_reflect,
+    re_search,
+    format_sources,
 )
 
 logger = get_logger(__name__)
 
 
-def should_continue(state: AgentState) -> str:
-    """决定是否继续迭代。"""
-    iteration = state.get("iteration", 0)
+def should_research(state: AgentState) -> str:
+    """判断是否需要补检索。"""
     reflection = state.get("reflection", {})
+    action = reflection.get("action", "proceed")
+    # 最多补检索 1 次
+    re_search_count = state.get("re_search_count", 0)
 
-    # 最多迭代 3 次
-    if iteration >= 3:
-        return "end"
-
-    # 如果相关性低，重新检索
-    if reflection.get("relevance") == "LOW":
-        return "retrieve"
-
-    return "end"
+    if action in ("re_search", "expand") and re_search_count < 1:
+        logger.info("should_research", action=action, re_search_count=re_search_count)
+        return "re_search"
+    return "proceed"
 
 
 def create_agent_graph() -> StateGraph:
@@ -39,8 +38,10 @@ def create_agent_graph() -> StateGraph:
 
     # 添加节点
     graph.add_node("analyze_query", analyze_query)
+    graph.add_node("plan_retrieval", plan_retrieval)
     graph.add_node("retrieve", retrieve)
     graph.add_node("evaluate_relevance", evaluate_relevance)
+    graph.add_node("re_search", re_search)
     graph.add_node("generate_answer", generate_answer)
     graph.add_node("self_reflect", self_reflect)
 
@@ -48,12 +49,18 @@ def create_agent_graph() -> StateGraph:
     graph.set_entry_point("analyze_query")
 
     # 添加边
-    graph.add_edge("analyze_query", "retrieve")
+    graph.add_edge("analyze_query", "plan_retrieval")
+    graph.add_edge("plan_retrieval", "retrieve")
     graph.add_edge("retrieve", "evaluate_relevance")
-    graph.add_conditional_edges("evaluate_relevance", should_continue, {
-        "retrieve": "retrieve",
-        "end": "generate_answer",
-    })
+    graph.add_conditional_edges(
+        "evaluate_relevance",
+        should_research,
+        {
+            "re_search": "re_search",
+            "proceed": "generate_answer",
+        },
+    )
+    graph.add_edge("re_search", "evaluate_relevance")
     graph.add_edge("generate_answer", "self_reflect")
     graph.add_edge("self_reflect", END)
 
@@ -82,6 +89,7 @@ async def run_agent(query: str, trace_id: str = "", top_k: int = 5) -> dict:
         "top_k": top_k,
         "iteration": 0,
         "error": None,
+        "re_search_count": 0,
     }
 
     result = await graph.ainvoke(initial_state)
@@ -96,6 +104,8 @@ async def run_agent_stream(query: str, trace_id: str = "", top_k: int = 5) -> As
     2. {"type": "token", "data": "..."}     — 逐 token 产出
     3. {"type": "done", "data": {...}}      — 完成
     """
+    from .nodes import evaluate_relevance, plan_retrieval
+
     sources = []
     answer_parts = []
 
@@ -105,11 +115,16 @@ async def run_agent_stream(query: str, trace_id: str = "", top_k: int = 5) -> As
         "top_k": top_k,
         "iteration": 0,
         "error": None,
+        "re_search_count": 0,
     }
 
     try:
+        # analyze_query → plan_retrieval → retrieve
         analyze_result = await analyze_query(state)
         state.update(analyze_result)
+
+        plan_result = await plan_retrieval(state)
+        state.update(plan_result)
 
         retrieve_result = await retrieve(state)
         state.update(retrieve_result)
@@ -117,6 +132,7 @@ async def run_agent_stream(query: str, trace_id: str = "", top_k: int = 5) -> As
         sources = format_sources(state.get("retrieval_results", []))
         yield {"type": "sources", "data": sources}
 
+        # 流式生成
         async for token in generate_answer_stream(state):
             answer_parts.append(token)
             yield {"type": "token", "data": token}

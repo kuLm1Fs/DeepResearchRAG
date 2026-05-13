@@ -74,3 +74,35 @@
 | agent.templates | ✅ | |
 | cli.main | ✅ | |
 | api.models | ❌→✅ | fastapi 已安装 |
+
+### Issue 8: Embedding batch_size=50 导致零向量
+- **文件**: `backend/src/vectorstore/embedding.py`
+- **问题**: `BATCH_SIZE = 50` 超过 aihubmix API 限制（max 16 items），所有向量为零
+- **影响**: Milvus 余弦相似度全部返回 0.0，搜索永远找不到结果
+- **修复**: `BATCH_SIZE = 50 → 16`
+- **状态**: ✅ 已修复
+
+### Issue 9: Semantic search async 嵌套 asyncio.run() 报错
+- **文件**: `backend/src/retrieval/retriever.py`
+- **问题**: `embed_texts()` 内部调用 `asyncio.run()`，在 FastAPI async 上下文中运行报错
+- **影响**: `semantic_search_failed: error='asyncio.run() cannot be called from a running event loop'`
+- **修复**: 使用 `embed_texts_async()` 替代
+- **状态**: ✅ 已修复
+
+### Issue 10: 前端 markdown 渲染缺失
+- **文件**: `frontend/src/components/ChatWindow.tsx`
+- **问题**: LLM 返回 markdown 格式但前端用纯文本渲染，格式混乱
+- **修复**: 添加 `react-markdown` + `remark-gfm`
+- **状态**: ✅ 已修复
+
+### Issue 11: .env.prod 被 git 追踪
+- **文件**: `backend/.env.prod`
+- **问题**: 含 API key 占位的配置文件不应提交到 git
+- **修复**: git rm --cached + .gitignore 添加 **/.env*
+- **状态**: ✅ 已修复
+
+### Issue 12: Agent workflow 过于简单
+- **文件**: `backend/src/agent/nodes.py`, `backend/src/agent/graph.py`
+- **问题**: 原流程只有分词→检索→LLM回答，无意图分析、query改写、质量评估
+- **修复**: 升级为 LLM 驱动的 agent workflow（6个节点 + 补检索循环）
+- **状态**: ✅ 已修复

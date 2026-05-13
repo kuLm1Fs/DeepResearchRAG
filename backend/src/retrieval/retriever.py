@@ -1,7 +1,7 @@
 from typing import Any
 
 from core import get_logger, settings, RetrievalError
-from vectorstore import MilvusStore, embed_texts
+from vectorstore import MilvusStore, embed_texts_async
 from .fusion import reciprocal_rank_fusion
 
 logger = get_logger(__name__)
@@ -37,7 +37,7 @@ class MultiPathRetriever:
         self.keyword_limit = keyword_limit
         self.title_limit = title_limit
 
-    def retrieve(
+    async def retrieve(
         self,
         query: str,
         top_k: int = 5,
@@ -62,13 +62,13 @@ class MultiPathRetriever:
 
         try:
             # Path 1: Semantic vector search
-            semantic_results = self._semantic_search(query)
+            semantic_results = await self._semantic_search(query)
 
             # Path 2: Keyword search
-            keyword_results = self._keyword_search(query)
+            keyword_results = await self._keyword_search(query)
 
             # Path 3: Title exact match
-            title_results = self._title_match(query)
+            title_results = await self._title_match(query)
 
             # Apply filters if provided
             if filters:
@@ -104,10 +104,10 @@ class MultiPathRetriever:
             logger.error("retrieval_failed", query=query, error=str(e))
             raise RetrievalError(f"Retrieval failed: {e}")
 
-    def _semantic_search(self, query: str) -> list[dict[str, Any]]:
+    async def _semantic_search(self, query: str) -> list[dict[str, Any]]:
         """Vector similarity search."""
         try:
-            query_embedding = embed_texts([query])[0]
+            query_embedding = (await embed_texts_async([query]))[0]
             return self.store.search(
                 query_embedding=query_embedding,
                 top_k=self.semantic_limit,
@@ -116,7 +116,7 @@ class MultiPathRetriever:
             logger.warning("semantic_search_failed", error=str(e))
             return []
 
-    def _keyword_search(self, query: str) -> list[dict[str, Any]]:
+    async def _keyword_search(self, query: str) -> list[dict[str, Any]]:
         """Keyword/fulltext search on title and content."""
         try:
             # 搜索 title 和 content 两个字段，使用 OR 条件
@@ -133,7 +133,7 @@ class MultiPathRetriever:
             logger.warning("keyword_search_failed", error=str(e))
             return []
 
-    def _title_match(self, query: str) -> list[dict[str, Any]]:
+    async def _title_match(self, query: str) -> list[dict[str, Any]]:
         """Exact title matching."""
         try:
             results = self.store.query(

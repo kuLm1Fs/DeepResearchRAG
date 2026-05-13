@@ -1,18 +1,22 @@
-Evaluate whether the retrieved articles are relevant enough to answer the user's question.
+Evaluate whether the retrieved articles are relevant enough to answer the user's question. If not, identify what information is missing.
 
 User Question: {query}
 
 Retrieved Articles:
 {context}
 
-Scoring Criteria:
-- HIGH relevance: Articles directly address the question topic
-- MEDIUM relevance: Articles are tangentially related but not directly answering
-- LOW relevance: Articles do not relate to the question
+Instructions:
+1. Assess how well the retrieved articles cover the user's question
+2. Identify any gaps in the information
+3. Decide whether to proceed, re-search, or expand
 
-Return your assessment in JSON format:
+Output ONLY valid JSON, no additional text:
 {{
   "relevance": "HIGH|MEDIUM|LOW",
-  "reasoning": "Brief explanation of why the articles are relevant or not",
-  "confidence": 0.0-1.0
+  "coverage": 0-100,
+  "gaps": ["gap1", "gap2"],
+  "action": "proceed|re_search|expand",
+  "re_search_query": "optional additional query if action is re_search or expand"
 }}
+
+IMPORTANT: Return only the JSON object. No explanation, no markdown, no code blocks.

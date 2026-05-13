@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { Message, Source } from '../types'
 
 interface ChatWindowProps {
@@ -145,7 +147,7 @@ export default function ChatWindow({ onSourcesUpdate }: ChatWindowProps) {
                   : 'bg-gray-100 text-gray-900'
               }`}
             >
-              {msg.content}
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
             </div>
           </div>
         ))}
