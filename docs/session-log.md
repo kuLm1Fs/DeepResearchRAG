@@ -171,3 +171,86 @@
 - Codex 的 prompt 要包含具体的测试命令
 - 每次 commit 前确保 Codex 测试通过
 - **task 开头必须写环境信息**（Python 路径、PYTHONPATH）
+
+---
+
+## 2026-05-13 会话记录
+
+### 会话概要
+- **时间**: 09:41 - 10:00
+- **参与者**: clawpy (PM) + Claude Code (CC) + Codex
+- **工作流**: PM分析项目 → CC写代码 → Codex测试 → git commit
+
+### 项目分析
+
+完成项目完整审计，识别出 5 个未完成/有 bug 的模块：
+
+| # | 问题 | 模块 | 严重度 |
+|---|------|------|--------|
+| 1 | `retrieve` top_k 写死为 5，没有从 state 读取 | agent/ | 中 |
+| 2 | 缺少 `/api/ingest/trigger` 和 `/api/ingest/status` 接口 | api/ | 高 |
+| 3 | llm/cache.py 循环导入标记（实际已修复） | llm/ | 低 |
+| 4 | SSE 流式输出是假 token（按空格拆分） | api/ | 低 |
+| 5 | 前端缺少错误处理、健康检查、数据导入入口 | frontend/ | 高 |
+
+### 第一轮：后端 Bug 修复 (09:42 - 09:50)
+
+**任务**: 修复 agent top_k 传递 + 补全 ingest API + 验证 cache + SSE TODO
+
+| 步骤 | 结果 |
+|------|------|
+| CC 写代码 | ✅ 修复 4 个 task，修改 5 个文件 |
+| Codex 测试 | ✅ 24/24 模块导入全部通过 |
+| Codex 修复 | 修了 1 个 bug：`from embedding import EmbeddingService` 错误导入（未使用） |
+
+**提交**: `f16806c fix(api): remove invalid ingest trigger import`
+
+**改动文件**:
+- `backend/src/agent/state.py` — 添加 top_k 字段
+- `backend/src/agent/graph.py` — run_agent 传递 top_k 到 initial_state
+- `backend/src/api/models.py` — 添加 IngestTriggerRequest/Response + IngestStatusResponse
+- `backend/src/api/routes.py` — 添加 POST /ingest/trigger 和 GET /ingest/status
+- `backend/src/agent/nodes.py` — SSE TODO 注释
+
+### 第二轮：前端改进 (09:50 - 09:58)
+
+**任务**: ChatWindow 错误处理 + HealthBadge 健康检查 + IngestPanel 数据导入 + API 客户端扩展
+
+| 步骤 | 结果 |
+|------|------|
+| CC 写代码 | ✅ 创建 2 个新组件 + 修改 4 个文件，构建通过 |
+| Codex 测试 | ✅ TypeScript 类型检查 + 生产构建全部通过 |
+| Codex 修复 | 修了多个问题：HTTP 状态码检查、SSE 错误事件、定时器清理、类型对齐、JSON body 修正 |
+
+**提交**: `8c41e98 feat(frontend): improve health ingest and chat error handling`
+
+**改动文件**:
+- `frontend/src/components/ChatWindow.tsx` — 重写错误处理，红色错误气泡，SSE 分片 buffer
+- `frontend/src/components/HealthBadge.tsx` — 新建，30s 自动刷新，tooltip 显示 Milvus/LLM 状态
+- `frontend/src/components/IngestPanel.tsx` — 新建，数据源选择、limit 输入、触发按钮、状态展示
+- `frontend/src/api/client.ts` — 扩展 fetchWithErrorHandling，添加 healthCheck/ingestTrigger/getIngestStatus
+- `frontend/src/types/index.ts` — 新增 HealthResponse、IngestTriggerRequest/Response、IngestStatusResponse
+- `frontend/src/App.tsx` — 集成 HealthBadge 到 header，IngestPanel 到来源面板上方
+
+### 第三轮：SSE 真正流式输出 (09:58 - 10:05)
+
+**任务**: 将假 token 流（按空格拆分）改为真正的 LLM token 流式输出
+
+| 步骤 | 结果 |
+|------|------|
+| CC 写代码 | ✅ 新增流式函数 + 双路径路由，修改 3 个文件 |
+| Codex 测试 | ✅ 24/24 导入通过 + 流式 mock 测试通过 |
+| Codex 修复 | 修了 1 个 bug：`_format_messages` 不支持 dict 输入（新增 generate_answer_stream 传入的是 dict） |
+
+**提交**: `1f4aaf2 feat(api): 真正的 LLM token 流式输出`
+
+**改动文件**:
+- `backend/src/agent/nodes.py` — 新增 `generate_answer_stream()` 异步生成器，直接调用 `llm.stream_chat()`
+- `backend/src/agent/graph.py` — 新增 `run_agent_stream()`，按 sources → token → done 顺序产出 SSE 事件
+- `backend/src/api/routes.py` — query 端点支持 `stream=True`（真正流式）和 `stream=False`（全量返回）双路径
+- `backend/src/llm/client.py` — 修复 `_format_messages()` 同时支持 dict 和 Message 对象输入
+
+**架构说明**:
+- LangGraph 节点返回 dict，不适合流式，所以保留原有 graph 用于非流式场景
+- 流式路径：retrieval 同步完成 → 直接调用 `stream_chat()` 逐 token 产出 → SSE 事件
+- CachedLLM.stream_chat 直接透传底层 LLM，不做缓存（流式场景下缓存意义不大）
