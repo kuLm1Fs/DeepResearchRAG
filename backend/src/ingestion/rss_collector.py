@@ -78,6 +78,24 @@ class RSSCollector(BaseCollector):
             raise RuntimeError(f"无法解析 RSS 源: {url}")
         return feed
 
+    def _fetch_feed_with_retry(url: str) -> feedparser.FeedParserDict:
+        """获取并解析 RSS 源（带重试和多次尝试）"""
+        logger.debug("[RSSCollector] 正在获取订阅源", url=url)
+        last_exc = None
+        for attempt in range(3):
+            try:
+                feed = feedparser.parse(url)
+                if feed.entries or not feed.bozo:
+                    return feed
+                logger.warning("[RSSCollector] bozo retry", url=url, attempt=attempt + 1)
+            except Exception as e:
+                last_exc = e
+                logger.warning("[RSSCollector] fetch exception", url=url, attempt=attempt + 1, error=str(e))
+        # Fallback: return feed even with bozo (some valid feeds have bozo bit)
+        if 'feed' in dir() and feed.entries:
+            return feed
+        raise RuntimeError(f"无法解析 RSS 源: {url}") from last_exc
+
     @staticmethod
     def _fetch_full_text(url: str) -> str | None:
         """
@@ -99,7 +117,7 @@ class RSSCollector(BaseCollector):
                     downloaded,
                     include_comments=False,
                     include_tables=True,
-                    output_format="plain text",
+                    output_format="txt",
                 )
                 return text if text else None
             return None

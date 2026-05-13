@@ -59,6 +59,8 @@ async def analyze_query(state: dict) -> dict:
     from llm import create_llm
 
     query = state.get("query", "")
+    use_history = state.get("use_history", False)
+    conversation_history = state.get("conversation_history", [])
     logger.info("analyzing_query", query=query)
 
     llm = create_llm(
@@ -68,6 +70,17 @@ async def analyze_query(state: dict) -> dict:
     )
 
     prompt = load_prompt("analyze_query", query=query)
+
+    # 如果启用历史上下文，把历史消息加入 prompt
+    if use_history and conversation_history:
+        history_lines = []
+        for msg in conversation_history[-10:]:  # 最多取最近10条
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            history_lines.append(f"{role}: {content}")
+        history_context = "\n".join(history_lines)
+        prompt = f"历史上下文：\n{history_context}\n\n当前问题：\n{prompt}"
+
     messages = [{"role": "user", "content": prompt}]
 
     try:
@@ -299,29 +312,82 @@ async def generate_answer(state: dict) -> dict:
 
 
 async def self_reflect(state: dict) -> dict:
-    """Self-reflection on generated answer quality."""
+    """深度反思：检查答案质量、来源覆盖、是否需要补充。"""
     answer = state.get("answer", "")
     query = state.get("query", "")
+    results = state.get("retrieval_results", [])
     sources = state.get("sources", [])
 
-    if not answer or answer.startswith("Failed"):
-        return {"reflection": {"quality": "POOR", "issues": ["Answer generation failed"]}}
-
-    # Simple heuristic check for MVP
     issues = []
-    if len(answer) < 50:
-        issues.append("Answer too short")
-    if not any(c.isalpha() for c in answer):
-        issues.append("Answer contains no text")
 
-    quality = "GOOD" if not issues else "FAIR" if len(issues) == 1 else "POOR"
+    # 检查答案长度
+    if len(answer) < 80:
+        issues.append("答案过短")
+
+    # 检查来源覆盖
+    if not sources:
+        issues.append("无来源引用")
+    elif len(sources) < 2:
+        issues.append("来源单一")
+
+    # 检查是否有实质性内容
+    if not any(c.isalpha() for c in answer):
+        issues.append("答案无实质内容")
+
+    # 检查是否直接使用了检索结果（通过关键词匹配）
+    has_citation = any(
+        keyword in answer.lower()
+        for result in results[:3]
+        for keyword in (result.get("title", "") or "").split()[:5]
+        if len(keyword) > 4
+    )
+    if not has_citation:
+        issues.append("答案未引用检索来源")
+
+    # 质量评分
+    quality_map = {0: "POOR", 1: "FAIR", 2: "GOOD", 3: "EXCELLENT"}
+    num_issues = len(issues)
+    quality = quality_map.get(min(num_issues, 3), "POOR")
 
     return {
         "reflection": {
             "quality": quality,
             "issues": issues,
+            "needs_revision": num_issues >= 2,
         }
     }
+
+
+async def compare_sources(state: dict) -> dict:
+    """多源对比：检查检索结果是否来自不同来源，生成对比摘要。"""
+    results = state.get("retrieval_results", [])
+
+    if len(results) < 2:
+        return {"source_comparison": None}
+
+    # 按来源分组
+    sources: dict[str, list[dict]] = {}
+    for r in results:
+        src = r.get("source", "unknown")
+        if src not in sources:
+            sources[src] = []
+        sources[src].append(r)
+
+    # 如果来源单一，无需对比
+    if len(sources) < 2:
+        return {"source_comparison": None}
+
+    comparison = {
+        "num_sources": len(sources),
+        "sources": list(sources.keys()),
+        "consensus": "",  # 共识内容
+        "conflicts": [],  # 矛盾内容
+    }
+
+    # 简单逻辑：检查不同来源对同一事件的描述是否一致
+    # （MVP 版本不做复杂比对了，只记录来源多样性）
+
+    return {"source_comparison": comparison}
 
 
 async def generate_answer_stream(state: dict) -> AsyncIterator[str]:

@@ -15,6 +15,7 @@ from .nodes import (
     self_reflect,
     re_search,
     format_sources,
+    compare_sources,
 )
 
 logger = get_logger(__name__)
@@ -38,6 +39,7 @@ def create_agent_graph() -> StateGraph:
 
     # 添加节点
     graph.add_node("analyze_query", analyze_query)
+    graph.add_node("compare_sources", compare_sources)
     graph.add_node("plan_retrieval", plan_retrieval)
     graph.add_node("retrieve", retrieve)
     graph.add_node("evaluate_relevance", evaluate_relevance)
@@ -49,7 +51,8 @@ def create_agent_graph() -> StateGraph:
     graph.set_entry_point("analyze_query")
 
     # 添加边
-    graph.add_edge("analyze_query", "plan_retrieval")
+    graph.add_edge("analyze_query", "compare_sources")
+    graph.add_edge("compare_sources", "plan_retrieval")
     graph.add_edge("plan_retrieval", "retrieve")
     graph.add_edge("retrieve", "evaluate_relevance")
     graph.add_conditional_edges(
@@ -79,7 +82,7 @@ def get_compiled_graph():
     return compiled_graph
 
 
-async def run_agent(query: str, trace_id: str = "", top_k: int = 5) -> dict:
+async def run_agent(query: str, trace_id: str = "", top_k: int = 5, use_history: bool = False, history: list[dict] = None) -> dict:
     """运行 Agent，返回结果。"""
     graph = get_compiled_graph()
 
@@ -87,6 +90,8 @@ async def run_agent(query: str, trace_id: str = "", top_k: int = 5) -> dict:
         "query": query,
         "trace_id": trace_id,
         "top_k": top_k,
+        "use_history": use_history,
+        "conversation_history": history or [],
         "iteration": 0,
         "error": None,
         "re_search_count": 0,
@@ -113,6 +118,8 @@ async def run_agent_stream(query: str, trace_id: str = "", top_k: int = 5) -> As
         "query": query,
         "trace_id": trace_id,
         "top_k": top_k,
+        "use_history": False,
+        "conversation_history": [],
         "iteration": 0,
         "error": None,
         "re_search_count": 0,

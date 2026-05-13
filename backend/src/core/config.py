@@ -24,7 +24,9 @@ class Settings(BaseSettings):
     llm_model: str = "deepseek-chat"
     deepseek_api_key: str = ""
     openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
     qwen_api_key: str = ""
+    qwen_model: str = "qwen-turbo"
 
     # Embedding
     volcengine_api_key: str = ""

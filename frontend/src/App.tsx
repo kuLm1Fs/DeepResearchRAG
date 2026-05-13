@@ -3,6 +3,8 @@ import ChatWindow from './components/ChatWindow'
 import SourcePanel from './components/SourcePanel'
 import HealthBadge from './components/HealthBadge'
 import IngestPanel from './components/IngestPanel'
+import { HistoryPanel } from './components/HistoryPanel'
+import { Dashboard } from './components/Dashboard'
 
 function App() {
   const [sources, setSources] = useState<any[]>([])
@@ -14,7 +16,10 @@ function App() {
       <div className="flex-1 flex flex-col">
         <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-900">RAG News Intelligence</h1>
-          <HealthBadge />
+          <div className="flex items-center gap-4">
+            <Dashboard />
+            <HealthBadge />
+          </div>
         </header>
         <ChatWindow onSourcesUpdate={setSources} />
       </div>
@@ -29,6 +34,9 @@ function App() {
         </button>
         {!panelCollapsed && (
           <>
+            <div className="p-4 border-b border-gray-200">
+              <HistoryPanel />
+            </div>
             <IngestPanel />
             <SourcePanel sources={sources} />
           </>

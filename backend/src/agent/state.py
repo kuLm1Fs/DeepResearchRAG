@@ -16,3 +16,5 @@ class AgentState(TypedDict, total=False):
     iteration: int                      # Current iteration count
     top_k: int                          # Number of results to retrieve
     error: str | None                    # Error message if any
+    conversation_history: list[dict]    # Dialog history, each item is {"role": "user"/"assistant", "content": str}
+    use_history: bool                   # Whether to use history context (default False)

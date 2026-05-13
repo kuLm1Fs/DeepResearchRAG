@@ -59,6 +59,23 @@ export interface Source {
   published_at?: number
 }
 
+// 历史记录类型
+export interface HistoryItem {
+  id: string
+  query: string
+  timestamp: number
+  sourceCount: number
+}
+
+// 统计数据类型
+export interface StatsData {
+  totalArticles: number
+  totalChunks: number
+  sources: string[]
+  categories: string[]
+  lastUpdated: string | null
+}
+
 // 健康检查响应类型
 export interface HealthResponse {
   status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown'

@@ -62,32 +62,32 @@ class ChunkStore:
     def __init__(self, collection_name: str = CHUNK_COLLECTION_NAME):
         self.collection_name = collection_name
         self._collection: Collection | None = None
-        get_milvus_connection()
+        self.alias = get_milvus_connection()
 
     @property
     def collection(self) -> Collection:
         """Get or load the collection."""
         if self._collection is None:
-            if not utility.has_collection(self.collection_name):
+            if not utility.has_collection(self.collection_name, using=self.alias):
                 self.create_collection()
-            self._collection = Collection(self.collection_name)
+            self._collection = Collection(self.collection_name, using=self.alias)
             self._collection.load()
         return self._collection
 
     def create_collection(self, drop_existing: bool = False) -> None:
         """Create the chunks collection with indexes."""
-        if utility.has_collection(self.collection_name):
+        if utility.has_collection(self.collection_name, using=self.alias):
             if drop_existing:
-                utility.drop_collection(self.collection_name)
+                utility.drop_collection(self.collection_name, using=self.alias)
                 logger.info("chunk_collection_dropped", name=self.collection_name)
             else:
                 logger.info("chunk_collection_exists", name=self.collection_name)
-                self._collection = Collection(self.collection_name)
+                self._collection = Collection(self.collection_name, using=self.alias)
                 self._collection.load()
                 return
 
         schema = create_chunk_schema()
-        self._collection = Collection(name=self.collection_name, schema=schema)
+        self._collection = Collection(name=self.collection_name, schema=schema, using=self.alias)
 
         # Create vector index
         index_params = {
@@ -241,7 +241,7 @@ class ChunkStore:
 
     def drop_collection(self) -> None:
         """Drop the entire collection."""
-        if utility.has_collection(self.collection_name):
-            utility.drop_collection(self.collection_name)
+        if utility.has_collection(self.collection_name, using=self.alias):
+            utility.drop_collection(self.collection_name, using=self.alias)
             self._collection = None
             logger.info("chunk_collection_dropped", name=self.collection_name)

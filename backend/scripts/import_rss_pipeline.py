@@ -14,6 +14,7 @@ RSS 全文采集 → MinIO 存储 → Chunk 切分 → Embedding → Milvus 导�
 import argparse
 import asyncio
 import sys
+from itertools import islice
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -26,6 +27,7 @@ from vectorstore import ChunkStore, embed_texts_async
 
 configure_logging()
 logger = get_logger(__name__)
+EMBEDDING_MAX_CHARS = 2000
 
 # RSS 源名称映射（对应 RSSCollector 的 source_name 字段）
 RSS_NAME_MAP = {
@@ -56,20 +58,23 @@ async def process_articles(articles: list[dict], minio: MinioStore, chunk_store:
                 logger.info("minio_uploaded", hash=content_hash[:16])
 
             # 2. 切 chunk
-            chunks = chunk_article({
-                "title": article.get("title", ""),
-                "pub_time": article.get("pub_time", ""),
-                "source": article.get("source", ""),
-                "lead": article.get("lead", ""),
-                "content": full_text,
-            })
+            chunks = chunk_article(
+                {
+                    "title": article.get("title", ""),
+                    "pub_time": article.get("pub_time", ""),
+                    "source": article.get("source", ""),
+                    "lead": article.get("lead", ""),
+                    "content": full_text,
+                },
+                max_chars=3500,
+            )
             logger.info("article_chunks", title=article.get("title", "")[:40], chunk_count=len(chunks))
 
             if not chunks:
                 continue
 
             # 3. 批量 embed（batch_size=16）
-            texts = [c["content"] for c in chunks]
+            texts = [c["content"][:EMBEDDING_MAX_CHARS] for c in chunks]
             embeddings = await embed_texts_async(texts, batch_size=16)
 
             # 4. 写入 Milvus
@@ -83,7 +88,7 @@ async def process_articles(articles: list[dict], minio: MinioStore, chunk_store:
 
         except Exception as e:
             stats["errors"] += 1
-            logger.error("article_process_failed", title=article.get("title", "")[:40], error=str(e))
+            logger.exception("article_process_failed", title=article.get("title", "")[:40], error=str(e))
 
     return stats
 
@@ -108,17 +113,18 @@ async def main():
     all_articles = []
     for source in source_names:
         try:
-            articles = list(collector.collect_from_source(
-                url=next(r["url"] for r in collector.sources if r["name"] == source),
+            source_config = next(r for r in collector.sources if r["name"] == source)
+            articles = list(islice(collector.collect_from_source(
+                url=source_config["url"],
                 source_name=source,
-                language=next(r["language"] for r in collector.sources if r["name"] == source),
-                category=next(r.get("category", "news") for r in collector.sources if r["name"] == source),
+                language=source_config["language"],
+                category=source_config.get("category", "news"),
                 fetch_full_text=True,
-            ))
+            ), args.limit))
             all_articles.extend(articles)
             logger.info("source_fetched", source=source, count=len(articles))
         except Exception as e:
-            logger.error("source_fetch_failed", source=source, error=str(e))
+            logger.exception("source_fetch_failed", source=source, error=str(e))
 
     logger.info("total_articles", count=len(all_articles))
     if not all_articles:
@@ -130,7 +136,7 @@ async def main():
         print(f"[Dry Run] 采集到 {len(all_articles)} 条文章，跳过写入")
         for a in all_articles:
             print(f"  - {a.get('title', '')[:60]}")
-        return
+        return 0
 
     stats = await process_articles(all_articles, minio, chunk_store)
 
@@ -143,6 +149,7 @@ async def main():
     print(f"  错误数: {stats['errors']}")
     print(f"  MinIO: {minio.stats()}")
     print(f"  Milvus: {chunk_store.stats()}")
+    return 1 if stats["errors"] else 0
 
 
 if __name__ == "__main__":

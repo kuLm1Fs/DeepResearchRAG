@@ -3,6 +3,7 @@ from typing import Any
 from core import get_logger, settings, RetrievalError
 from vectorstore import MilvusStore, embed_texts_async
 from .fusion import reciprocal_rank_fusion
+from .boost import boost_results
 
 logger = get_logger(__name__)
 
@@ -90,8 +91,17 @@ class MultiPathRetriever:
                 k=60,
             )
 
+            # Apply boost (time decay + source quality)
+            boosted = boost_results(
+                fused,
+                use_time_decay=True,
+                use_source_quality=True,
+                time_weight=0.3,
+                source_weight=0.2,
+            )
+
             # Return top_k
-            final_results = fused[:top_k]
+            final_results = boosted[:top_k]
 
             logger.info("retrieval_completed",
                 query=query,
