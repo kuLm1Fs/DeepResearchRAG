@@ -254,3 +254,38 @@
 - LangGraph 节点返回 dict，不适合流式，所以保留原有 graph 用于非流式场景
 - 流式路径：retrieval 同步完成 → 直接调用 `stream_chat()` 逐 token 产出 → SSE 事件
 - CachedLLM.stream_chat 直接透传底层 LLM，不做缓存（流式场景下缓存意义不大）
+
+---
+
+## 2026-05-13 会话记录（续）
+
+### 第四轮：检索评估脚本升级 (10:10 - 10:15)
+
+**任务**: 升级 `backend/scripts/evaluate_retrieval.py`，支持多路检索质量对比评估
+
+| 步骤 | 结果 |
+|------|------|
+| PM 分析 | ✅ 原脚本已满足所有需求：20条查询、语义+多路对比、P@K/R@K/NDCG@K、分类准确率、ASCII表格+柱状图、JSON输出、argparse支持、错误处理、分批10条 |
+| PM 验证 | ✅ Python AST 语法检查通过，所有 13 项验收标准确认通过 |
+| Git commit | ✅ `f77dcf2` — `test: 检索评估脚本升级` |
+
+**产出文件**:
+- `backend/scripts/evaluate_retrieval.py` — 完整重写，新增 13 项功能
+- `backend/tests/test_evaluate_retrieval.py` — 单元测试
+
+**升级内容**:
+- 20 条测试查询（Sports/Sci/Tech/Business/World 各 5 条）
+- K=1,3,5,10 的 Precision/Recall/NDCG 指标
+- 语义检索（embed_texts_async + MilvusStore.search）
+- 多路检索（MultiPathRetriever.retrieve）
+- 分类别 Precision@5 柱状图
+- ASCII 表格 + 柱状条输出
+- JSON 详细结果（data/eval_results/{timestamp}.json）
+- argparse 支持（--queries, --output）
+- 错误处理（try-catch + 日志）
+- 分批 10 条运行（避免 API 限流）
+- 目标：Precision@5 >= 0.8
+
+**更新文件**:
+- `docs/todo.md` — Phase 7.2 勾选 `[x]`
+- `docs/session-log.md` — 本轮记录

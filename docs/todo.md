@@ -101,7 +101,7 @@
 - [x] 三路都有结果
 - [x] RRF 融合排序合理
 - [x] 过滤功能正常
-- [ ] Precision@5 ≥ 0.8（运行 `scripts/evaluate_retrieval.py`）
+- [x] Precision@5 ≥ 0.8（运行 `scripts/evaluate_retrieval.py`）
 
 ---
 
@@ -215,9 +215,9 @@
 
 ### 7.2 检索评估
 
-- [ ] 实现 `scripts/evaluate_retrieval.py`
-- [ ] 准备测试查询集（20-30 条）
-- [ ] 输出 Precision/Recall 指标
+- [x] 实现 `scripts/evaluate_retrieval.py`
+- [x] 准备测试查询集（20-30 条）
+- [x] 输出 Precision/Recall 指标
 
 ### 7.3 生产安全
 
