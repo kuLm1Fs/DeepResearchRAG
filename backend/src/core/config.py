@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     langchain_project: str = "rag-news-intelligence"
     langchain_endpoint: str = "https://api.smith.langchain.com"
 
+    # JWT Authentication
+    jwt_secret: str = ""  # Must be set, no default
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 30
+    jwt_refresh_token_expire_days: int = 7
+
     # Paths
     project_root: Path = _project_root
     data_dir: Path = project_root / "data"
