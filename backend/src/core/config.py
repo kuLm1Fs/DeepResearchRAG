@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     milvus_user: str = ""
     milvus_password: str = ""
 
+    # MinIO
+    minio_host: str = "localhost"
+    minio_port: int = 9000
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_bucket: str = "news-articles"
+
     # Observability
     llm_cache: bool = True
     log_level: str = "DEBUG"

@@ -1,12 +1,13 @@
 """
 RSS 采集器 - 支持中英文新闻源
-使用 feedparser 解析 RSS/Atom 订阅源，支持 tenacity 重试机制
+使用 feedparser 解析 RSS/Atom 订阅源，使用 trafilatura 抓取全文
 """
-import feedparser
-import structlog
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
+import feedparser
+import structlog
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -38,6 +39,11 @@ RSS_SOURCES: list[dict[str, str]] = [
 ]
 
 
+def _compute_content_hash(title: str, content: str) -> str:
+    """计算内容 hash 用于去重"""
+    return hashlib.sha256(f"{title}|{content}".encode()).hexdigest()
+
+
 class RSSCollector(BaseCollector):
     """
     RSS 订阅源采集器
@@ -59,32 +65,56 @@ class RSSCollector(BaseCollector):
 
     @staticmethod
     @retry(
-        stop=stop_after_attempt(3),  # 最多重试3次
-        wait=wait_exponential(multiplier=1, min=2, max=10),  # 指数退避 2-10 秒
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(Exception),
         reraise=True,
     )
     def _fetch_feed(url: str) -> feedparser.FeedParserDict:
-        """
-        获取并解析 RSS 源（带重试）
-
-        Args:
-            url: RSS 源 URL
-
-        Returns:
-            解析后的 feed 对象
-
-        Raises:
-            RuntimeError: 解析失败时重试
-        """
+        """获取并解析 RSS 源（带重试）"""
         logger.debug("[RSSCollector] 正在获取订阅源", url=url)
         feed = feedparser.parse(url)
         if feed.bozo and not feed.entries:
-            # 只有在无法获取任何条目时才视为错误
             raise RuntimeError(f"无法解析 RSS 源: {url}")
         return feed
 
-    def _parse_entry(self, entry: Any, source_name: str, language: str, category: str) -> dict[str, Any] | None:
+    @staticmethod
+    def _fetch_full_text(url: str) -> str | None:
+        """
+        使用 trafilatura 抓取页面全文
+
+        Args:
+            url: 文章 URL
+
+        Returns:
+            全文内容，抓取失败返回 None
+        """
+        try:
+            import trafilatura
+
+            downloaded = trafilatura.fetch_url(url)
+            if downloaded:
+                # 提取正文，禁用 XML 输出以获得更自然的文本
+                text = trafilatura.extract(
+                    downloaded,
+                    include_comments=False,
+                    include_tables=True,
+                    output_format="plain text",
+                )
+                return text if text else None
+            return None
+        except Exception as e:
+            logger.debug("trafilatura_fetch_failed", url=url, error=str(e))
+            return None
+
+    def _parse_entry(
+        self,
+        entry: Any,
+        source_name: str,
+        language: str,
+        category: str,
+        fetch_full_text: bool = False,
+    ) -> dict[str, Any] | None:
         """
         解析单条 RSS 条目
 
@@ -93,6 +123,7 @@ class RSSCollector(BaseCollector):
             source_name: 来源名称
             language: 语言代码
             category: 分类
+            fetch_full_text: 是否使用 trafilatura 抓取全文
 
         Returns:
             标准化的文章字典，解析失败返回 None
@@ -102,48 +133,71 @@ class RSSCollector(BaseCollector):
             title = getattr(entry, "title", None) or ""
             title = title.strip()
 
-            # 获取内容摘要，优先使用 summary，其次 content
+            # 获取内容摘要
             content = ""
             if hasattr(entry, "summary"):
                 content = entry.summary
             elif hasattr(entry, "content"):
-                # content 是列表，取第一个元素
                 if entry.content and len(entry.content) > 0:
                     content = entry.content[0].value
             content = content.strip()
 
-            # 如果没有摘要，尝试从 title 生成（用于纯标题场景）
+            # 如果没有摘要，从 title 生成
             if not content and title:
                 content = title
 
             # 获取发布时间
             published_at = 0
+            pub_time_str = ""
             if hasattr(entry, "published_parsed") and entry.published_parsed:
                 dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
                 published_at = int(dt.timestamp())
+                pub_time_str = dt.isoformat()
             elif hasattr(entry, "updated_parsed") and entry.updated_parsed:
                 dt = datetime(*entry.updated_parsed[:6], tzinfo=timezone.utc)
                 published_at = int(dt.timestamp())
+                pub_time_str = dt.isoformat()
 
             # 获取链接
             link = getattr(entry, "link", "") or ""
 
+            # 尝试抓取全文
+            full_text = None
+            if fetch_full_text and link:
+                full_text = self._fetch_full_text(link)
+
+            # 如果 trafilatura 抓不到，用 RSS snippet 作为全文
+            if full_text is None:
+                full_text = content
+
+            # 计算 content_hash
+            content_hash = _compute_content_hash(title, full_text)
+
+            # 尝试提取导语（lead）- 取摘要的前 200 字作为导语
+            lead = content[:200] if len(content) > 200 else content
+
             return {
                 "title": title,
-                "content": content,
+                "content": full_text,  # 完整正文
+                "lead": lead,  # 导语
                 "source": source_name,
                 "language": language,
                 "category": category,
                 "published_at": published_at,
+                "pub_time": pub_time_str,
                 "url": link,
+                "content_hash": content_hash,
             }
         except Exception as e:
             logger.warning("[RSSCollector] 解析条目失败", error=str(e), entry_title=getattr(entry, "title", ""))
             return None
 
-    def collect(self, **kwargs) -> Iterator[dict[str, Any]]:
+    def collect(self, fetch_full_text: bool = False, **kwargs) -> Iterator[dict[str, Any]]:
         """
         采集所有配置的 RSS 源
+
+        Args:
+            fetch_full_text: 是否使用 trafilatura 抓取全文（默认 False，节省时间）
 
         Yields:
             标准化的文章字典
@@ -161,7 +215,7 @@ class RSSCollector(BaseCollector):
 
                 entry_count = 0
                 for entry in feed.entries or []:
-                    article = self._parse_entry(entry, source_name, language, category)
+                    article = self._parse_entry(entry, source_name, language, category, fetch_full_text)
                     if article:
                         yield article
                         entry_count += 1
@@ -172,7 +226,14 @@ class RSSCollector(BaseCollector):
                 logger.error("[RSSCollector] 订阅源采集失败", source=source_name, error=str(e))
                 continue
 
-    def collect_from_source(self, url: str, source_name: str, language: str = "en", category: str = "news") -> Iterator[dict[str, Any]]:
+    def collect_from_source(
+        self,
+        url: str,
+        source_name: str,
+        language: str = "en",
+        category: str = "news",
+        fetch_full_text: bool = False,
+    ) -> Iterator[dict[str, Any]]:
         """
         从指定 RSS 源采集（临时单源）
 
@@ -181,6 +242,7 @@ class RSSCollector(BaseCollector):
             source_name: 来源名称
             language: 语言代码
             category: 分类
+            fetch_full_text: 是否抓取全文
 
         Yields:
             标准化的文章字典
@@ -191,7 +253,7 @@ class RSSCollector(BaseCollector):
             feed = self._fetch_feed(url)
 
             for entry in feed.entries or []:
-                article = self._parse_entry(entry, source_name, language, category)
+                article = self._parse_entry(entry, source_name, language, category, fetch_full_text)
                 if article:
                     yield article
 

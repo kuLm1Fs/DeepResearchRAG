@@ -1,5 +1,6 @@
 from .milvus_store import MilvusStore, COLLECTION_NAME, DIM, get_milvus_connection, create_schema
 from .embedding import embed_texts, embed_texts_async, CachedEmbedding
+from .chunk_store import ChunkStore
 
 __all__ = [
     "MilvusStore",
@@ -10,4 +11,5 @@ __all__ = [
     "embed_texts",
     "embed_texts_async",
     "CachedEmbedding",
+    "ChunkStore",
 ]
