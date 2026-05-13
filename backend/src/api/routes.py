@@ -27,51 +27,56 @@ async def query(request: QueryRequest, req: Request):
         stream=request.stream,
     )
 
-    from ..agent import run_agent
+    if request.stream:
+        # 流式路径：真正的 token 流
+        from agent.graph import run_agent_stream
 
-    # Run agent synchronously (could be made async with proper async LLM calls)
-    result = await run_agent(
-        query=request.query,
-        trace_id=trace_id,
-        top_k=request.top_k,
-    )
-
-    answer = result.get("answer", "")
-    sources = result.get("sources", [])
-
-    async def event_generator():
-        # Send sources first
-        sources_data = [Source(**s) if isinstance(s, dict) else s for s in sources]
-        yield {
-            "event": "sources",
-            "data": json.dumps({"type": "sources", "data": [s.model_dump() for s in sources_data]}),
-        }
-
-        # Stream answer tokens
-        if request.stream:
-            # Simple tokenization (in production, use proper token streaming from LLM)
-            words = answer.split()
-            for i, word in enumerate(words):
+        async def stream_generator():
+            try:
+                async for event in run_agent_stream(
+                    query=request.query,
+                    trace_id=trace_id,
+                    top_k=request.top_k,
+                ):
+                    event_type = event["type"]
+                    yield {
+                        "event": event_type,
+                        "data": json.dumps(event, ensure_ascii=False),
+                    }
+            except Exception as e:
+                logger.error("stream_query_failed", error=str(e))
                 yield {
-                    "event": "token",
-                    "data": json.dumps({
-                        "type": "token",
-                        "data": word + (" " if i < len(words) - 1 else ""),
-                    }),
+                    "event": "error",
+                    "data": json.dumps({"type": "error", "data": str(e)}, ensure_ascii=False),
                 }
 
-        # Send done
-        response = QueryResponse(
-            answer=answer,
-            sources=[Source(**s) if isinstance(s, dict) else s for s in sources],
-            trace_id=trace_id,
-        )
-        yield {
-            "event": "done",
-            "data": json.dumps({"type": "done", "data": response.model_dump()}),
-        }
+        return EventSourceResponse(stream_generator())
+    else:
+        # 非流式路径：保持现有逻辑
+        from agent import run_agent
 
-    return EventSourceResponse(event_generator())
+        result = await run_agent(
+            query=request.query,
+            trace_id=trace_id,
+            top_k=request.top_k,
+        )
+
+        answer = result.get("answer", "")
+        sources = result.get("sources", [])
+
+        async def event_generator():
+            sources_data = [Source(**s) if isinstance(s, dict) else s for s in sources]
+            yield {
+                "event": "sources",
+                "data": json.dumps({"type": "sources", "data": [s.model_dump() for s in sources_data]}, ensure_ascii=False),
+            }
+            response = QueryResponse(answer=answer, sources=sources_data, trace_id=trace_id)
+            yield {
+                "event": "done",
+                "data": json.dumps({"type": "done", "data": response.model_dump()}, ensure_ascii=False),
+            }
+
+        return EventSourceResponse(event_generator())
 
 
 @router.get("/stats", response_model=StatsResponse)

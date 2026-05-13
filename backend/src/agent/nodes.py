@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, AsyncIterator
 
 from core import get_logger, settings
 from retrieval import MultiPathRetriever
@@ -191,3 +191,43 @@ async def self_reflect(state: dict) -> dict:
             "issues": issues,
         }
     }
+
+
+async def generate_answer_stream(state: dict) -> AsyncIterator[str]:
+    """流式生成回答，逐 token 产出。
+
+    与 generate_answer() 不同，此函数返回 AsyncIterator[str]，
+    用于 SSE 实时流式输出。
+    """
+    from llm import create_llm
+    from llm.cache import CachedLLM
+
+    query = state.get("query", "")
+    results = state.get("retrieval_results", [])
+
+    if not results:
+        yield "I couldn't find any relevant articles to answer your question."
+        return
+
+    llm = create_llm(
+        provider=settings.llm_provider,
+        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
+        model=settings.llm_model,
+    )
+
+    context = format_context(results)
+    prompt = load_prompt("generate_answer", query=query, context=context)
+    messages = [{"role": "user", "content": prompt}]
+
+    try:
+        if settings.llm_cache:
+            cached_llm = CachedLLM(llm, cache_dir=settings.llm_cache_dir / settings.llm_provider)
+            # 缓存模式下仍然走 stream_chat，CachedLLM 的 chat 是缓存的，stream 是实时的
+            async for token in cached_llm.stream_chat(messages):
+                yield token
+        else:
+            async for token in llm.stream_chat(messages):
+                yield token
+    except Exception as e:
+        logger.error("stream_answer_generation_failed", error=str(e))
+        yield f"\n\n[Error: {e}]"

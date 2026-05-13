@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Protocol
+from typing import Any, AsyncIterator, Protocol
 
 from core import get_logger
 
@@ -29,8 +29,20 @@ class BaseLLM(ABC):
         """Send a chat request and yield response tokens."""
         pass
 
-    def _format_messages(self, messages: list[Message]) -> list[dict]:
-        return [{"role": m.role, "content": m.content} for m in messages]
+    def _format_messages(self, messages: list[Message | dict[str, Any]]) -> list[dict]:
+        formatted = []
+        for message in messages:
+            if isinstance(message, dict):
+                formatted.append({
+                    "role": message["role"],
+                    "content": message["content"],
+                })
+            else:
+                formatted.append({
+                    "role": message.role,
+                    "content": message.content,
+                })
+        return formatted
 
 
 class DeepSeekLLM(BaseLLM):
