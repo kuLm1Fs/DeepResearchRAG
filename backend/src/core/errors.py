@@ -42,6 +42,12 @@ class ConfigError(RAGError):
         super().__init__(message, ErrorLevel.CRITICAL)
 
 
+class DatabaseError(RAGError):
+    """数据库错误 - 连接或查询失败"""
+    def __init__(self, message: str):
+        super().__init__(message, ErrorLevel.CRITICAL)
+
+
 class DataError(RAGError):
     """数据错误（格式、解析等）"""
     def __init__(self, message: str):

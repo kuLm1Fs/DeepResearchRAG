@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
 
+    # PostgreSQL
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_db: str = "rag_news"
+    postgres_user: str = "rag_user"
+    postgres_password: str = ""
+
     # Paths
     project_root: Path = _project_root
     data_dir: Path = project_root / "data"
