@@ -1,4 +1,5 @@
 """认证 API：注册 / 登录 / 刷新"""
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -21,6 +22,20 @@ from .models import (
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def hash_token(token: str) -> str:
+    """Hash a token (JWT refresh_token) using SHA256.
+
+    JWT tokens are already cryptographically signed, so we only need
+    a fast digest (not a slow KDF like bcrypt) to store as reference.
+    """
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def verify_token(token: str, hashed: str) -> bool:
+    """Verify a token against its SHA256 hash."""
+    return hashlib.sha256(token.encode()).hexdigest() == hashed
 
 
 def _generate_id(prefix: str) -> str:
@@ -76,7 +91,7 @@ async def register(req: RegisterRequest):
         refresh_token = create_refresh_token({"sub": user_id, "token_id": _generate_id("tok")})
 
         # 存储 refresh_token hash
-        token_hash = hash_password(refresh_token)  # 存 hash 不存明文
+        token_hash = hash_token(refresh_token)  # 存 hash 不存明文
         rt = RefreshToken(
             id=_generate_id("rtok"),
             user_id=user_id,
@@ -128,7 +143,7 @@ async def login(req: LoginRequest):
         refresh_token = create_refresh_token({"sub": user.id, "token_id": _generate_id("tok")})
 
         # 存储 refresh_token hash
-        token_hash = hash_password(refresh_token)
+        token_hash = hash_token(refresh_token)
         rt = RefreshToken(
             id=_generate_id("rtok"),
             user_id=user.id,
