@@ -164,18 +164,87 @@ def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = No
         }
     """
     task_id = str(uuid.uuid4())[:8]
-    # Stub：返回空证据（PostgreSQL + Milvus ai_industry_articles 就绪后替换）
-    return {
-        "task_id": task_id,
-        "status": "success",
-        "data": {
-            "evidence": [],
-            "total_count": 0,
-            "sources": []
-        },
-        "errors": [],
-        "gaps": ["证据库为空，需要先导入数据"]
-    }
+    all_evidence = []
+    errors = []
+    gaps = []
+
+    if not settings.volcengine_api_key:
+        return {
+            "task_id": task_id,
+            "status": "error",
+            "data": None,
+            "errors": ["volcengine API key 未配置"],
+            "gaps": ["请配置 VOLCENGINE_API_KEY 以启用检索功能"]
+        }
+
+    try:
+        from ..vectorstore.embedding import get_embedding_sync
+        from ..vectorstore.milvus_store import MilvusStore
+
+        store = MilvusStore()
+
+        for q in sub_questions:
+            emb = get_embedding_sync(q)
+            if emb is None:
+                errors.append(f"子问题 embedding 失败: {q}")
+                continue
+
+            try:
+                # user_id 过滤暂时禁用（需在 Milvus 建索引后启用）
+                # expr = f'user_id == "{user_id}"' if user_id else None
+                results = store.search(
+                    query_embedding=emb,
+                    top_k=top_k,
+                    expr=None,  # 暂时禁用，user_id 数据隔离由 PostgreSQL 层处理
+                )
+
+                for r in results:
+                    all_evidence.append({
+                        "title": r.get("title", ""),
+                        "content": r.get("content", ""),
+                        "source": r.get("source", ""),
+                        "url": r.get("url", ""),
+                        "score": float(r.get("score", 0.0)),
+                        "published_at": r.get("published_at", ""),
+                    })
+            except Exception as e:
+                errors.append(f"检索失败 [{q}]: {e}")
+
+        # 去重（按 content 前 200 字符）
+        seen = set()
+        deduped = []
+        for e in all_evidence:
+            key = e["content"][:200] if e["content"] else ""
+            if key and key not in seen:
+                seen.add(key)
+                deduped.append(e)
+
+        sources = list(set(e["source"] for e in deduped if e["source"]))
+
+        if not deduped:
+            gaps.append("证据库为空，建议先执行 RSS 采集导入数据")
+
+        return {
+            "task_id": task_id,
+            "status": "success",
+            "data": {
+                "evidence": deduped,
+                "total_count": len(deduped),
+                "sources": sources
+            },
+            "errors": errors,
+            "gaps": gaps
+        }
+
+    except Exception as e:
+        logger.error("retriever failed", error=str(e))
+        return {
+            "task_id": task_id,
+            "status": "error",
+            "data": None,
+            "errors": [str(e)],
+            "gaps": ["检索过程中发生错误"]
+        }
 
 
 def analyst(evidence: list[dict], focus: str = "all") -> dict[str, Any]:

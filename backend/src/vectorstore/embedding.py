@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -7,6 +8,27 @@ import tenacity
 from tqdm import tqdm
 
 from core import get_logger, settings
+
+logger = get_logger(__name__)
+
+EMBEDDING_DIM = 1024
+BATCH_SIZE = 16
+
+
+def get_embedding_sync(text: str) -> list[float] | None:
+    """同步版本的 embedding 获取（供 retriever 同步调用）。内部用 asyncio.run 调用 async embed_texts_async。Returns None if unavailable."""
+    if not settings.volcengine_api_key:
+        return None
+    try:
+        embeddings = embed_texts_sync([text])
+        return embeddings[0] if embeddings else None
+    except Exception:
+        return None
+
+
+def embed_texts_sync(texts: list[str], batch_size: int = BATCH_SIZE) -> list[list[float]]:
+    """同步 wrapper：调用 embed_texts_async"""
+    return asyncio.run(embed_texts_async(texts, batch_size))
 
 logger = get_logger(__name__)
 
