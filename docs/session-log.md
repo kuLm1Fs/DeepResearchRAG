@@ -633,3 +633,43 @@ cd backend && PYTHONPATH=src .venv/bin/python scripts/import_rss_pipeline.py --l
 
 ### 下一步
 - P1-17: 前端登录/注册页面
+
+---
+
+## 2026-05-14 会话记录（续）— P1-17 前端登录/注册页面
+
+### Task Card
+- **时间**: 12:07 - 12:15
+- CC: 直接执行成功
+
+### 流程记录
+
+| 步骤 | 结果 |
+|------|------|
+| Task Card | ✅ TASK-P1-17-FRONTEND-AUTH |
+| CC 写代码 | ✅ LoginForm + RegisterForm + AuthContext + AuthPage + App.tsx |
+| Codex 验证 | ✅ 4/4 测试（测试3命令问题不阻塞，实际6个API方法已确认存在） |
+| Git commit | ✅ `2bc3351` |
+| Todo 更新 | ✅ P1-17 勾选 |
+
+### Codex 验证结果（4/4 通过）
+
+| 测试 | 结果 |
+|------|------|
+| 文件存在性 (7个) | ✅ |
+| TypeScript 编译 | ✅ tsc + vite build, 296 modules |
+| API 方法 (rg 确认) | ✅ login/register/logout/getStoredUser/getAccessToken/refreshToken |
+| App.tsx Auth 集成 | ✅ AuthProvider + AuthPage + useAuth |
+
+### 交付文件
+- frontend/src/components/LoginForm.tsx — 登录表单
+- frontend/src/components/RegisterForm.tsx — 注册表单
+- frontend/src/context/AuthContext.tsx — 认证状态管理
+- frontend/src/pages/AuthPage.tsx — 登录/注册切换页
+- frontend/src/api/client.ts — auth API 方法
+- frontend/src/types/index.ts — Auth 类型
+- frontend/src/App.tsx — AuthProvider 路由守卫
+
+### 下一步
+- P1-18: Deep Research 入口页面
+- P1-19: 研究进度展示（Planner → Retriever → Analyst → Checker → Writer）

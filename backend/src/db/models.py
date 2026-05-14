@@ -27,9 +27,9 @@ class Company(Base):
     plan: Mapped[str] = mapped_column(String(32), default="free")
     quota_limit: Mapped[int] = mapped_column(Integer, default=10)
     quota_used: Mapped[int] = mapped_column(Integer, default=0)
-    quota_reset_at: Mapped[Date] = mapped_column(Date, default=func.current_date)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    quota_reset_at: Mapped[Date] = mapped_column(Date, server_default=text("CURRENT_DATE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     users: Mapped[list["User"]] = relationship("User", back_populates="company")
 
@@ -50,8 +50,8 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(32), default="member")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     company: Mapped[Optional["Company"]] = relationship("Company", back_populates="users")
     tasks: Mapped[list["ResearchTask"]] = relationship("ResearchTask", back_populates="user")
@@ -84,8 +84,8 @@ class ResearchTask(Base):
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user: Mapped[Optional["User"]] = relationship("User", back_populates="tasks")
 
@@ -102,8 +102,8 @@ class UserPreference(Base):
     preferred_output: Mapped[str] = mapped_column(String(32), default="markdown_report")
     ppt_pages: Mapped[int] = mapped_column(Integer, default=10)
     notification_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user: Mapped["User"] = relationship("User", back_populates="preferences")
 
@@ -120,7 +120,7 @@ class RefreshToken(Base):
     token_hash: Mapped[str] = mapped_column(String(256), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class AuditLog(Base):
@@ -140,4 +140,4 @@ class AuditLog(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(String(48))
     user_agent: Mapped[Optional[str]] = mapped_column(Text)
     details: Mapped[Optional[dict]] = mapped_column(JSONB)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
