@@ -444,3 +444,43 @@ cd backend && PYTHONPATH=src .venv/bin/python scripts/import_rss_pipeline.py --l
 ### 用户跳过项目
 - RSS 定时调度 / Reddit 采集器 / 爬虫
 - 部署文档 / CI/CD / Nginx
+
+---
+
+## 2026-05-14 会话记录 — P0 模块完成
+
+### 会话概要
+- **时间**: 01:08 - 01:20
+- **参与者**: clawpy (PM) + Claude Code (CC)
+- **工作流**: PM 分析 → 写 Task Card → CC 执行 → PM 验收 → commit
+
+### Task Card 完成记录
+
+#### TASK-1-AUTH — JWT 认证基础设施
+
+| 步骤 | 结果 |
+|------|------|
+| Task Card 编写 | ✅ P0-4 JWT 认证基础设施 |
+| CC 执行 | ✅ 创建 3 个文件 + 修改 config |
+| PM 验收测试 | ✅ 密码哈希 + JWT 测试通过 |
+| Git commit | ✅ `c71b688` |
+| Todo 更新 | ✅ P0-4 勾选 |
+
+**提交**: `c71b688` — feat(auth): JWT 认证基础设施完成
+
+**产出文件**:
+- `backend/src/auth/password.py` — bcrypt 密码哈希
+- `backend/src/auth/jwt_handler.py` — JWT Token 管理
+- `backend/src/auth/__init__.py` — 公共导出
+- `backend/src/core/config.py` — 新增 JWT 配置
+
+**API 文档**：所有函数都有完整 docstring（Args/Returns/Raises）
+
+### 下一个 P0
+
+| P0 | 状态 |
+|----|------|
+| P0-1 新建 ai_industry_articles Collection | ⏳ 待做 |
+| P0-2 Supervisor + Multi-Tool 架构 | ⏳ 待做 |
+| P0-3 PostgreSQL 数据库初始化 | ⏳ 待做 |
+| P0-4 JWT 认证基础设施 | ✅ 完成 |

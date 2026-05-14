@@ -66,6 +66,22 @@ def create_access_token(
     return token
 
 
+def decode_access_token(token: str) -> dict:
+    """
+    解码并验证 access_token。
+
+    Args:
+        token (str): JWT access_token 字符串
+
+    Returns:
+        dict: token payload
+
+    Raises:
+        jwt.InvalidTokenError: token 无效或过期
+    """
+    return verify_token(token)
+
+
 def create_refresh_token(data: dict) -> str:
     """
     创建 JWT refresh_token。

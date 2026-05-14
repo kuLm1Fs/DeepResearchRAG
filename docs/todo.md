@@ -18,7 +18,7 @@
 - [ ] **P0-1** 新建 `ai_industry_articles` Milvus Collection（Schema + 索引 + user_id 字段）
 - [ ] **P0-2** Supervisor + Multi-Tool 架构（ResearchState + 5个Tool函数 + Supervisor prompt + LLM路由）
 - [ ] **P0-3** PostgreSQL 数据库初始化（执行 schema.sql + 连接池配置 + SQLAlchemy/asyncpg）
-- [ ] **P0-4** JWT 认证基础设施（bcrypt密码哈希 + JWT签名密钥 + access_token/refresh_token 生成）
+- [x] **P0-4** JWT 认证基础设施（bcrypt密码哈希 + JWT签名密钥 + access_token/refresh_token 生成）✅ `c71b688`
 
 ---
 
