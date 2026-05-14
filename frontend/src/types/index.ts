@@ -103,3 +103,38 @@ export interface IngestStatusResponse {
   sources: Record<string, number>
   collectors: string[]
 }
+
+// Auth Types
+export interface LoginRequest {
+  email: string
+  password: string
+}
+
+export interface RegisterRequest {
+  email: string
+  password: string
+  company_name?: string
+}
+
+export interface AuthResponse {
+  access_token: string
+  refresh_token: string
+  token_type: string
+  user: UserInfo
+}
+
+export interface UserInfo {
+  id: string
+  email: string
+  role: string
+  company_id: string | null
+}
+
+export interface RefreshRequest {
+  refresh_token: string
+}
+
+export interface RefreshResponse {
+  access_token: string
+  token_type: string
+}

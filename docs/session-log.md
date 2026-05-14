@@ -597,3 +597,39 @@ cd backend && PYTHONPATH=src .venv/bin/python scripts/import_rss_pipeline.py --l
 ### 下一步
 - P0-1/2/3/4 全部完成 ✅
 - 下一步：P1 系列（Deep Research 端到端集成）
+
+---
+
+## 2026-05-14 会话记录（续）— P1-12/13 认证 API 完成
+
+### Task Card
+- **时间**: 11:59 - 12:05
+- CC: claude -p 直接执行成功（无 SIGKILL）
+
+### 流程记录
+
+| 步骤 | 结果 |
+|------|------|
+| Task Card | ✅ TASK-P1-AUTH-API |
+| CC 写代码 | ✅ auth.py + models.py + routes.py |
+| Codex 验证 | ✅ 5/5 测试全部通过 |
+| Git commit | ✅ `860a527` |
+| Todo 更新 | ✅ P1-12 + P1-13 勾选 |
+
+### Codex 验证结果（5/5 通过）
+
+| 测试 | 结果 |
+|------|------|
+| 模块导入 | ✅ |
+| 模型字段验证 | ✅ |
+| 路由端点 (3个) | ✅ /auth/register, /auth/login, /auth/refresh |
+| 语法检查 | ✅ |
+| FastAPI app 加载 | ✅ 13 routes |
+
+### 交付文件
+- backend/src/api/auth.py — register/login/refresh 接口
+- backend/src/api/models.py — 请求/响应模型
+- backend/src/api/routes.py — 路由注册
+
+### 下一步
+- P1-17: 前端登录/注册页面

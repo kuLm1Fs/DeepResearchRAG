@@ -66,8 +66,8 @@
 
 ### 认证与用户
 
-- [ ] **P1-12** 注册接口（`POST /api/auth/register`）+ 自动创建公司
-- [ ] **P1-13** 登录接口（`POST /api/auth/login`）+ JWT token 返回
+- [x] **P1-12** 注册接口（`POST /api/auth/register`）+ 自动创建公司
+- [x] **P1-13** 登录接口（`POST /api/auth/login`）+ JWT token 返回
 - [ ] **P1-14** Token 刷新（`POST /api/auth/refresh`）+ refresh_token 机制
 - [ ] **P1-15** 认证中间件（JWT验证 + user_id/company_id 注入 + 数据隔离）
 - [ ] **P1-16** 配额控制（公司quota_limit检查 + 任务完成时increment + 超出拒绝）

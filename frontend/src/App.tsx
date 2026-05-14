@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { AuthProvider, useAuth } from './context/AuthContext'
+import AuthPage from './pages/AuthPage'
 import ChatWindow from './components/ChatWindow'
 import SourcePanel from './components/SourcePanel'
 import HealthBadge from './components/HealthBadge'
@@ -6,9 +8,14 @@ import IngestPanel from './components/IngestPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { Dashboard } from './components/Dashboard'
 
-function App() {
+function AppContent() {
+  const { isAuthenticated, login, logout, user } = useAuth()
   const [sources, setSources] = useState<any[]>([])
   const [panelCollapsed, setPanelCollapsed] = useState(false)
+
+  if (!isAuthenticated) {
+    return <AuthPage onAuthSuccess={login} />
+  }
 
   return (
     <div className="flex h-screen">
@@ -19,6 +26,12 @@ function App() {
           <div className="flex items-center gap-4">
             <Dashboard />
             <HealthBadge />
+            <div className="flex items-center gap-3 ml-4">
+              <span className="text-sm text-gray-600">{user?.email}</span>
+              <button onClick={logout} className="text-sm text-blue-600 hover:underline">
+                退出
+              </button>
+            </div>
           </div>
         </header>
         <ChatWindow onSourcesUpdate={setSources} />
@@ -46,4 +59,10 @@ function App() {
   )
 }
 
-export default App
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  )
+}

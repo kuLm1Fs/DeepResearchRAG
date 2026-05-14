@@ -1,4 +1,4 @@
-import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, QueryRequest, QueryResponse, Source } from '../types'
+import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, QueryRequest, QueryResponse, Source, LoginRequest, RegisterRequest, AuthResponse, RefreshRequest, RefreshResponse, UserInfo } from '../types'
 
 const API_BASE = '/api'
 
@@ -59,4 +59,55 @@ export async function ingestTrigger(source?: string, limit?: number): Promise<In
 
 export async function getIngestStatus(): Promise<IngestStatusResponse> {
   return fetchWithErrorHandling<IngestStatusResponse>(`${API_BASE}/ingest/status`)
+}
+
+export async function login(req: LoginRequest): Promise<AuthResponse> {
+  const res = await fetchWithErrorHandling<AuthResponse>(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (res.access_token) {
+    localStorage.setItem('access_token', res.access_token)
+    localStorage.setItem('refresh_token', res.refresh_token)
+    localStorage.setItem('user', JSON.stringify(res.user))
+  }
+  return res
+}
+
+export async function register(req: RegisterRequest): Promise<AuthResponse> {
+  const res = await fetchWithErrorHandling<AuthResponse>(`${API_BASE}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (res.access_token) {
+    localStorage.setItem('access_token', res.access_token)
+    localStorage.setItem('refresh_token', res.refresh_token)
+    localStorage.setItem('user', JSON.stringify(res.user))
+  }
+  return res
+}
+
+export async function logout() {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+  localStorage.removeItem('user')
+}
+
+export function getStoredUser(): UserInfo | null {
+  const u = localStorage.getItem('user')
+  return u ? JSON.parse(u) : null
+}
+
+export function getAccessToken(): string | null {
+  return localStorage.getItem('access_token')
+}
+
+export async function refreshToken(req: RefreshRequest): Promise<RefreshResponse> {
+  return fetchWithErrorHandling<RefreshResponse>(`${API_BASE}/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
 }
