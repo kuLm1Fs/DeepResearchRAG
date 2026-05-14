@@ -1,9 +1,11 @@
 """5个 Tool Function 实现（Stub）"""
+import asyncio
+import json
 import uuid
 from datetime import datetime
 from typing import Any
 
-from ..core import get_logger
+from ..core import settings, get_logger
 
 logger = get_logger(__name__)
 
@@ -21,21 +23,100 @@ def planner(query: str, user_id: str | None = None) -> dict[str, Any]:
             "task_id": str,
             "status": "success" | "error",
             "data": {
-                "goals": list[str],           # 研究目标
-                "audience": str,              # 目标受众
-                "output_format": str,         # markdown/ppt/both
-                "time_window": str,           # last_1_month / last_3_months / all
-                "sub_questions": list[str],   # 拆解的子问题
+                "goals": list[str],
+                "audience": str,
+                "output_format": str,
+                "time_window": str,
+                "sub_questions": list[str],
                 "estimated_duration_minutes": int
             },
             "errors": list[str],
             "gaps": list[str]
         }
     """
-    task_id = str(uuid.uuid4())[:8]
-    # Stub：返回示例数据
+    # 检查 LLM 配置
+    if not settings.deepseek_api_key and not settings.openai_api_key and not settings.qwen_api_key:
+        logger.warning("planner: no LLM API key configured, returning stub")
+        return _stub_planner(query)
+
+    try:
+        return _call_llm_planner(query)
+    except Exception as e:
+        logger.error("planner LLM call failed", error=str(e))
+        return _error_result(str(e))
+
+
+def _call_llm_planner(query: str) -> dict[str, Any]:
+    """调用 LLM 生成研究计划（同步包装）"""
+    return asyncio.run(_async_llm_planner(query))
+
+
+async def _async_llm_planner(query: str) -> dict[str, Any]:
+    """调用 LLM 生成研究计划（async）"""
+    from ..llm import create_llm
+
+    llm = create_llm(
+        provider=settings.llm_provider,
+        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
+        model=settings.llm_model
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": """你是一个专业的研究规划师。用户会提出一个研究问题，你需要：
+1. 分析问题意图和目标
+2. 识别目标受众
+3. 制定研究目标
+4. 拆解为 3-5 个子问题
+5. 确定输出格式和时间范围
+
+请以 JSON 格式输出研究计划，不要包含其他内容：
+
+{
+  "goals": ["目标1", "目标2"],
+  "audience": "受众描述",
+  "output_format": "markdown/ppt/both",
+  "time_window": "last_1_month/last_3_months/last_6_months/all",
+  "sub_questions": ["子问题1", "子问题2", "子问题3"],
+  "estimated_duration_minutes": 预估分钟数
+}"""
+        },
+        {
+            "role": "user",
+            "content": f"研究问题：{query}"
+        }
+    ]
+
+    response = await llm.chat(messages)
+
+    # 解析 JSON
+    try:
+        # 尝试提取 JSON 代码块
+        if "```json" in response:
+            json_str = response.split("```json")[1].split("```")[0].strip()
+        elif "```" in response:
+            json_str = response.split("```")[1].split("```")[0].strip()
+        else:
+            json_str = response.strip()
+
+        data = json.loads(json_str)
+        return {
+            "task_id": str(uuid.uuid4())[:8],
+            "status": "success",
+            "data": data,
+            "errors": [],
+            "gaps": []
+        }
+    except json.JSONDecodeError as e:
+        logger.warning("planner JSON parse failed", error=str(e), response=response[:200])
+        # Fallback: 返回一个基础计划
+        return _stub_planner(query)
+
+
+def _stub_planner(query: str) -> dict[str, Any]:
+    """无 LLM 时的 Stub 返回"""
     return {
-        "task_id": task_id,
+        "task_id": str(uuid.uuid4())[:8],
         "status": "success",
         "data": {
             "goals": [f"分析 {query} 相关趋势", "识别机会与风险"],
@@ -46,7 +127,17 @@ def planner(query: str, user_id: str | None = None) -> dict[str, Any]:
             "estimated_duration_minutes": 5
         },
         "errors": [],
-        "gaps": ["需要补充更多一手信源"]
+        "gaps": ["需要配置 LLM API key 以获得真实分析"]
+    }
+
+
+def _error_result(error: str) -> dict[str, Any]:
+    return {
+        "task_id": str(uuid.uuid4())[:8],
+        "status": "error",
+        "data": None,
+        "errors": [error],
+        "gaps": ["planner 调用失败"]
     }
 
 
