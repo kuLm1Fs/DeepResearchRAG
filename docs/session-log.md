@@ -559,3 +559,41 @@ cd backend && PYTHONPATH=src .venv/bin/python scripts/import_rss_pipeline.py --l
 ### 下一步
 - P0-2: Supervisor + Multi-Tool 架构
 - P0-3: PostgreSQL 数据库初始化
+
+---
+
+## 2026-05-14 会话记录（续）— P0-3 PostgreSQL 数据库初始化
+
+### Task Card
+- **时间**: 11:16 - 11:50
+- **问题**: CC 被 SIGKILL × 2，最后用 nohup 绕过 TTY 问题成功
+
+### 流程记录
+
+| 步骤 | 结果 |
+|------|------|
+| CC 写代码 | ⚠️ SIGKILL × 2（TTY 问题），nohup 后成功 |
+| Codex 验证 | ✅ 5/5 测试通过（测试3需 POSTGRES_PASSWORD 环境变量） |
+| Git commit | ✅ `7969beb` |
+| Todo 更新 | ✅ P0-3 勾选 |
+
+### Codex 验证结果（5/5 通过）
+
+| 测试 | 结果 |
+|------|------|
+| 模块导入 | ✅ |
+| 6张表 ORM 模型 | ✅ Company 8字段 / User 9字段 / ResearchTask 17字段 |
+| database.py 函数 | ✅ (环境变量 POSTGRES_PASSWORD=test) |
+| init_postgres.py 可执行 | ✅ |
+| config.py postgres 配置 | ✅ |
+
+### 交付文件
+- backend/src/db/database.py — async SQLAlchemy 连接管理
+- backend/src/db/models.py — 6张表 ORM
+- backend/src/db/__init__.py — 导出
+- backend/scripts/init_postgres.py — schema.sql 执行脚本
+- backend/src/core/config.py — postgres 配置字段（已存在）
+
+### 下一步
+- P0-1/2/3/4 全部完成 ✅
+- 下一步：P1 系列（Deep Research 端到端集成）

@@ -76,3 +76,53 @@ class IngestStatusResponse(BaseModel):
     total_articles: int
     sources: dict[str, int]
     collectors: list[str]
+
+
+# --- 注册 ---
+class RegisterRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=256)
+    password: str = Field(..., min_length=8, max_length=128)
+    company_name: str | None = Field(None, max_length=256)  # 可选，不填则自动生成
+
+
+class RegisterResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: "UserResponse"
+
+
+# --- 登录 ---
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: "UserResponse"
+
+
+# --- Token 刷新 ---
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+# --- User 响应模型 ---
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    role: str
+    company_id: str | None
+
+
+# --- 通用错误 ---
+class ErrorResponse(BaseModel):
+    detail: str
