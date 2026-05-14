@@ -28,7 +28,7 @@
 
 ### 子 Tool 实现
 
-- [ ] **P1-1** `planner` Tool（意图分析 + 受众识别 + 研究计划 + 子问题拆解 → JSON输出）
+- [x] **P1-1** `planner` Tool（意图分析 + 受众识别 + 研究计划 + 子问题拆解 → JSON输出）
 - [ ] **P1-2** `retriever` Tool（调用 MultiPathRetriever + 多轮检索 + 结果合并去重 → Evidence列表）
 - [ ] **P1-3** `analyst` Tool（趋势分析 + 机会分析 + 风险分析 → 结构化JSON输出）
 - [ ] **P1-4** `checker` Tool（来源可信度 / 时效 / 缺口检测 + 冲突检测低优先级 → 检查报告）
