@@ -1,7 +1,7 @@
 """认证 API：注册 / 登录 / 刷新"""
 import hashlib
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
@@ -96,7 +96,7 @@ async def register(req: RegisterRequest):
             id=_generate_id("rtok"),
             user_id=user_id,
             token_hash=token_hash,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+            expires_at=datetime.utcnow() + timedelta(days=7),
         )
         db.add(rt)
         await db.flush()
@@ -136,7 +136,7 @@ async def login(req: LoginRequest):
             raise HTTPException(status_code=403, detail="账号已被禁用")
 
         # 更新 last_login
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = datetime.utcnow()
 
         # 生成 tokens
         access_token = create_access_token({"sub": user.id, "company_id": user.company_id})
@@ -148,7 +148,7 @@ async def login(req: LoginRequest):
             id=_generate_id("rtok"),
             user_id=user.id,
             token_hash=token_hash,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+            expires_at=datetime.utcnow() + timedelta(days=7),
         )
         db.add(rt)
 
