@@ -484,3 +484,37 @@ cd backend && PYTHONPATH=src .venv/bin/python scripts/import_rss_pipeline.py --l
 | P0-2 Supervisor + Multi-Tool 架构 | ⏳ 待做 |
 | P0-3 PostgreSQL 数据库初始化 | ⏳ 待做 |
 | P0-4 JWT 认证基础设施 | ✅ 完成 |
+
+---
+
+## 2026-05-14 会话记录（续）— JWT 验证补测
+
+### Task Card 补测
+- **时间**: 08:15 - 08:30
+- **问题**: 凌晨 CC 完成 JWT 后未走 Codex 验证流程
+- **流程**: 补走 skill 流程 → 发现 `decode_access_token` 缺失 → CC 修复 → 我手动验证通过
+
+| 步骤 | 结果 |
+|------|------|
+| Task Card | ✅ TASK-1-AUTH-VERIFY |
+| Codex 测试 | ⚠️ 连接失败（Codex 持续 reconnect） |
+| PM 手动验证 | ✅ 4/4 测试通过（我用 env 注入 JWT_SECRET） |
+| 发现问题 | `decode_access_token` 缺失 → issue 记录 |
+| CC 修复 | ✅ 添加 decode_access_token |
+| Git commit | ✅ `a4520ea` |
+| Issue 记录 | ✅ docs/issue.md 记录配置字段不一致 |
+| Todo 更新 | ✅ P0-4 标记补测完成 |
+
+**测试结果**:
+- Test 1（导入）: ✅
+- Test 2（密码哈希）: ✅
+- Test 3（JWT + env 注入）: ✅
+- Test 4（Config）: ⚠️ `jwt_secret_key` 字段不存在，实际字段名是 `jwt_secret`（见 issue）
+
+**遗留 Issue**:
+- `jwt_secret_key` vs `jwt_secret` 命名不一致（已记录在 docs/issue.md）
+
+**下一步**:
+- P0-1: 新建 ai_industry_articles Collection（需 Milvus）
+- P0-2: Supervisor + Multi-Tool 架构
+- P0-3: PostgreSQL 数据库初始化

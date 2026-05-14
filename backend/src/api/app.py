@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
     setup_langsmith()
 
     # 生产环境验证
-    if not settings.DEBUG:
+    if not settings.debug:
         logger.info("生产模式启动")
         # 验证 LLM 缓存已关闭
         if settings.LLM_CACHE_ENABLED:
