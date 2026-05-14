@@ -7,10 +7,12 @@ from vectorstore import MilvusStore
 
 from .models import QueryRequest, QueryResponse, StatsResponse, HealthResponse, Source, IngestTriggerRequest, IngestTriggerResponse, IngestStatusResponse
 from .auth import router as auth_router
+from .research import router as research_router
 
 logger = get_logger(__name__)
 router = APIRouter()
 router.include_router(auth_router)
+router.include_router(research_router)
 
 
 @router.post("/query")

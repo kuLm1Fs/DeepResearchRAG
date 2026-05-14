@@ -2,8 +2,9 @@
 import hashlib
 import uuid
 from datetime import datetime, timedelta
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy import select
 
 from ..auth import hash_password, verify_password, create_access_token, create_refresh_token, decode_access_token
@@ -41,6 +42,42 @@ def verify_token(token: str, hashed: str) -> bool:
 def _generate_id(prefix: str) -> str:
     """生成带前缀的唯一ID"""
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+async def get_current_user(authorization: Annotated[str | None, Header()] = None) -> User:
+    """
+    从 Authorization header 提取 Bearer token，解码后返回当前用户。
+    用于需要登录的 API 端点的 Depends。
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="缺少 Authorization header")
+
+    parts = authorization.split(" ")
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Authorization 格式应为: Bearer <token>")
+
+    token = parts[1]
+    try:
+        payload = decode_access_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="无效的 token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="token 无效")
+
+    async with get_db_session() as db:
+        stmt = select(User).where(User.id == user_id)
+        result = await db.execute(stmt)
+        user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=401, detail="用户不存在")
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账号已被禁用")
+
+    return user
 
 
 # --- 注册 ---
