@@ -562,15 +562,279 @@ def writer(analysis: dict, check_result: dict | None, output_format: str = "both
             "gaps": list[str]
         }
     """
-    task_id = str(uuid.uuid4())[:8]
+    # 无 LLM key → 返回 stub
+    if not settings.deepseek_api_key and not settings.openai_api_key and not settings.qwen_api_key:
+        return _stub_writer(analysis, check_result)
+
+    try:
+        return _call_writer(analysis, check_result, output_format)
+    except Exception as e:
+        logger.error("writer LLM call failed", error=str(e))
+        return _error_writer(str(e))
+
+
+def _call_writer(analysis: dict, check_result: dict | None, output_format: str) -> dict[str, Any]:
+    """调用 LLM 生成报告（同步包装）"""
+    return asyncio.run(_async_writer(analysis, check_result, output_format))
+
+
+async def _async_writer(analysis: dict, check_result: dict | None, output_format: str) -> dict[str, Any]:
+    """调用 LLM 生成 Markdown 报告（async）"""
+    from ..llm import create_llm
+
+    llm = create_llm(
+        provider=settings.llm_provider,
+        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
+        model=settings.llm_model
+    )
+
+    # 提取 analyst 数据（兼容 stub 输出）
+    data = analysis.get("data", {}) if isinstance(analysis, dict) else {}
+    trends = data.get("trends", [])
+    opportunities = data.get("opportunities", [])
+    risks = data.get("risks", [])
+    summary = data.get("summary", "暂无摘要")
+
+    # 提取 checker 数据（兼容 stub 输出）
+    check_data = check_result.get("data", {}) if isinstance(check_result, dict) and check_result else {}
+    coverage = check_data.get("coverage", 0.0)
+    credibility_issues = check_data.get("credibility_issues", [])
+    conflicts = check_data.get("conflicts", [])
+    gaps = check_data.get("gaps", [])
+    recommendations = check_data.get("recommendations", [])
+
+    # 构建 Markdown 报告
+    report_md = await _build_markdown_report(
+        summary, trends, opportunities, risks,
+        coverage, credibility_issues, conflicts, gaps, recommendations, llm
+    )
+
     return {
-        "task_id": task_id,
+        "task_id": str(uuid.uuid4())[:8],
         "status": "success",
         "data": {
-            "report_md": "# 研究报告（Stub）\n\n证据不足，内容待补充。",
+            "report_md": report_md,
             "ppt_outline": {"title": "研究汇报", "pages": []},
             "slides": []
         },
         "errors": [],
-        "gaps": ["需要真实分析数据"]
+        "gaps": []
+    }
+
+
+async def _build_markdown_report(
+    summary: str,
+    trends: list[dict],
+    opportunities: list[dict],
+    risks: list[dict],
+    coverage: float,
+    credibility_issues: list[dict],
+    conflicts: list[dict],
+    gaps: list[str],
+    recommendations: list[str],
+    llm
+) -> str:
+    """构建 Markdown 报告（优先 LLM 生成，fallback 到模板）"""
+    # 格式化 trends
+    trends_text = ""
+    for t in trends:
+        topic = t.get("topic", "未知趋势")
+        description = t.get("description", "")
+        confidence = t.get("confidence", 0.0)
+        trends_text += f"### {topic}\n{description}\n来源置信度：{confidence:.0%}\n\n"
+
+    # 格式化 opportunities
+    opportunities_text = ""
+    for o in opportunities:
+        title = o.get("title", "未知机会")
+        description = o.get("description", "")
+        evidence_count = o.get("evidence_count", 0)
+        opportunities_text += f"### {title}\n{description}\n证据数量：{evidence_count}\n\n"
+
+    # 格式化 risks
+    risks_text = ""
+    for r in risks:
+        title = r.get("title", "未知风险")
+        description = r.get("description", "")
+        severity = r.get("severity", "unknown")
+        risks_text += f"### {title}\n{description}\n严重程度：{severity}\n\n"
+
+    # 格式化 credibility_issues
+    credibility_text = ""
+    for issue in credibility_issues:
+        source = issue.get("source", "未知来源")
+        issue_desc = issue.get("issue", "")
+        credibility_text += f"- {source}: {issue_desc}\n"
+
+    # 格式化 conflicts
+    conflicts_text = ""
+    for c in conflicts:
+        claim_a = c.get("claim_a", "")
+        claim_b = c.get("claim_b", "")
+        resolution = c.get("resolution", "")
+        conflicts_text += f"- 冲突：{claim_a} vs {claim_b} → {resolution}\n"
+
+    # 格式化 gaps
+    gaps_text = ""
+    for g in gaps:
+        gaps_text += f"- 缺口：{g}\n"
+
+    # 格式化 recommendations
+    recommendations_text = ""
+    for r in recommendations:
+        recommendations_text += f"- {r}\n"
+
+    messages = [
+        {
+            "role": "system",
+            "content": """你是一个专业的研究报告撰写专家。根据以下分析数据和核查结果，生成一份结构完整的 Markdown 研究报告。
+
+要求：
+1. 报告必须包含：执行摘要、趋势分析、机会分析、风险分析、事实核查结果、建议
+2. 使用中文撰写
+3. 逻辑清晰，论述有据
+4. 不要生成额外的 JSON 或代码块，只输出纯 Markdown 格式
+
+主题：研究主题（根据内容自行推断）
+
+## 执行摘要
+{summary}
+
+## 趋势分析
+{trends_text}
+
+## 机会分析
+{opportunities_text}
+
+## 风险分析
+{risks_text}
+
+## 事实核查结果
+证据覆盖率：{coverage:.0%}
+{credibility_text}
+{conflicts_text}
+{gaps_text}
+
+## 建议
+{recommendations_text}"""
+        },
+        {
+            "role": "user",
+            "content": f"请根据以上信息生成研究报告。"
+        }
+    ]
+
+    response = await llm.chat(messages)
+
+    # 尝试解析是否返回了有效报告
+    if response and len(response) > 100 and "#" in response:
+        return response
+    else:
+        # Fallback: 返回基于模板的报告
+        return _generate_fallback_report(
+            summary, trends_text, opportunities_text, risks_text,
+            coverage, credibility_text, conflicts_text, gaps_text, recommendations_text
+        )
+
+
+def _generate_fallback_report(
+    summary: str,
+    trends_text: str,
+    opportunities_text: str,
+    risks_text: str,
+    coverage: float,
+    credibility_text: str,
+    conflicts_text: str,
+    gaps_text: str,
+    recommendations_text: str
+) -> str:
+    """生成基于模板的报告（LLM 生成失败时 fallback）"""
+    report = f"""# 研究报告
+
+## 执行摘要
+{summary}
+
+## 趋势分析
+{trends_text or "暂无趋势数据"}
+
+## 机会分析
+{opportunities_text or "暂无机会数据"}
+
+## 风险分析
+{risks_text or "暂无风险数据"}
+
+## 事实核查结果
+证据覆盖率：{coverage:.0%}
+
+{credibility_text or "- 暂无可信度问题"}
+{conflicts_text or "- 暂无冲突检测"}
+{gaps_text or "- 暂无缺口"}
+
+## 建议
+{recommendations_text or "- 建议继续收集证据"}
+"""
+    return report
+
+
+def _stub_writer(analysis: dict, check_result: dict | None) -> dict[str, Any]:
+    """无 LLM 时的 Stub 返回"""
+    data = analysis.get("data", {}) if isinstance(analysis, dict) else {}
+    summary = data.get("summary", "暂无摘要")
+    trends = data.get("trends", [])
+    opportunities = data.get("opportunities", [])
+    risks = data.get("risks", [])
+
+    check_data = check_result.get("data", {}) if isinstance(check_result, dict) and check_result else {}
+    coverage = check_data.get("coverage", 0.0)
+    recommendations = check_data.get("recommendations", [])
+
+    # 构建简单的 stub 报告
+    trends_text = "\n".join([f"- **{t.get('topic', '未知趋势')}**：{t.get('description', '')}" for t in trends]) if trends else "暂无趋势数据"
+    opportunities_text = "\n".join([f"- **{o.get('title', '未知机会')}**：{o.get('description', '')}" for o in opportunities]) if opportunities else "暂无机会数据"
+    risks_text = "\n".join([f"- **{r.get('title', '未知风险')}**：{r.get('description', '')} (严重程度: {r.get('severity', 'unknown')})" for r in risks]) if risks else "暂无风险数据"
+    recommendations_text = "\n".join([f"- {r}" for r in recommendations]) if recommendations else "- 暂无建议"
+
+    report_md = f"""# 研究报告（Stub 模式）
+
+> ⚠️ 当前处于 Stub 模式，建议配置 LLM API key 以获得真实分析报告。
+
+## 执行摘要
+{summary}
+
+## 趋势分析
+{trends_text}
+
+## 机会分析
+{opportunities_text}
+
+## 风险分析
+{risks_text}
+
+## 事实核查结果
+证据覆盖率：{coverage:.0%}
+
+## 建议
+{recommendations_text}
+"""
+
+    return {
+        "task_id": str(uuid.uuid4())[:8],
+        "status": "success",
+        "data": {
+            "report_md": report_md,
+            "ppt_outline": {"title": "研究汇报", "pages": []},
+            "slides": []
+        },
+        "errors": [],
+        "gaps": ["writer 处于 stub 模式，需要配置 LLM API key"]
+    }
+
+
+def _error_writer(error: str) -> dict[str, Any]:
+    return {
+        "task_id": str(uuid.uuid4())[:8],
+        "status": "error",
+        "data": None,
+        "errors": [error],
+        "gaps": ["writer 调用失败"]
     }

@@ -1,262 +1,339 @@
 # RAG News Intelligence — TODO
 
-## 阶段 0 — 规划与设计 ✅
+> 本文件已合并根目录 `TODO.md` 与原 `docs/todo.md`。现在只保留这一份根目录 TODO。
+>
+> 标记口径：`[x]` 表示代码或文档中已有可识别实现；`[ ]` 表示仍未完成、未接入主流程，或还缺少端到端验证。部分“有骨架但未闭环”的项会拆成已完成和待完成两条。
 
-- [x] 技术栈选型（Python + FastAPI + LangGraph + 火山引擎 Embedding + Milvus 全量版 + React + Tailwind）
-- [x] 服务器评估（4核15.6GB，可用 Docker）
-- [x] LLM 选型（DeepSeek 主 + OpenAI/Qwen 备，支持切换）
-- [x] 召回策略（多路召回 + RRF 融合）
-- [x] Agent 架构（LangGraph，Pipeline 模式）
-- [x] 调试方案（LangSmith、LLM 缓存、trace_id、结构化日志）
-- [x] 生产安全（环境隔离、敏感脱敏、dump 禁止、错误分级）
-- [x] 前端设计（Clean Light、7:3分栏、折叠卡片）
-- [x] 完整版设计文档 (`docs/full-design.md`)
-- [x] MVP 设计文档 (`docs/mvp-design.md`)
+## 当前进度总览
+
+- [x] News RAG 基础工程骨架已完成：FastAPI、React、Milvus、PostgreSQL、认证、采集器、LangGraph、LLM 客户端。
+- [x] News RAG 问答主链路已有实现：查询 API、SSE 流式返回、来源面板、Milvus 检索、LLM 生成。
+- [ ] News RAG 端到端稳定性仍需验证：本地服务、真实 API key、真实 Milvus 数据、前后端完整查询流程。
+- [ ] Deep Research 仍未真正产品化：已有设计、schema、部分工具函数和 API 入口，但 Writer 仍是 stub，API 只跑 planner + retriever。
+- [ ] 自动测试未通过：`uv run pytest` 当前因 `ModuleNotFoundError: No module named 'scripts'` 在收集阶段失败。
+
+---
+
+## 优先级说明
+
+| 等级 | 定义 | 说明 |
+|------|------|------|
+| P0 | 阻塞 | 不完成就无法开始下一项 |
+| P1 | 必须 | 本阶段必须完成 |
+| P2 | 应该 | 重要但不紧急 |
+| P3 | 可以 | 锦上添花或未来探索 |
+
+---
+
+## P0 — 基础设施与架构
+
+- [x] 技术栈选型（Python + FastAPI + LangGraph + Embedding API + Milvus + React + Tailwind）
+- [x] 完整版设计文档（`docs/full-design.md`）
+- [x] MVP 设计文档（`docs/mvp-design.md`）
+- [x] Deep Research Agent 接入设计（`docs/deep-research-agent-design.md`）
+- [x] PostgreSQL schema 设计（companies / users / research_tasks / user_preferences / refresh_tokens / audit_logs）
+- [x] PostgreSQL async 连接池配置（SQLAlchemy + asyncpg）
+- [x] JWT 认证基础设施（密码哈希、access_token、refresh_token）
+- [x] `ai_industry_articles` Milvus Collection schema + 索引 + user_id 字段
+- [x] Supervisor + Multi-Tool 架构骨架（ResearchState + planner/retriever/analyst/checker/writer + research graph）
+- [ ] Research Supervisor 主流程接入 Deep Research API
 
 ---
 
 ## 阶段 1 — 项目骨架
 
-### 1.1 后端初始化
+### 后端
 
-- [ ] 创建 `backend/src/` 目录结构
-- [ ] 创建 `pyproject.toml`，配置依赖
-- [ ] 配置 pydantic-settings
-- [ ] 创建 `.env.dev` 和 `.env.prod` 模板
+- [x] 创建 `backend/src/` 目录结构
+- [x] 创建 `backend/pyproject.toml` 并配置依赖
+- [x] 配置 `pydantic-settings`
+- [x] 配置 `.env` 示例与生产模板
+- [x] 基础日志输出
+- [x] trace_id 中间件
 
-### 1.2 Docker 配置
+### Docker / 基础服务
 
-- [ ] 创建 `docker/docker-compose.yml`（Milvus + etcd + MinIO）
-- [ ] 验证容器启动：`docker ps` 显示三个容器运行中
+- [x] 创建 `docker/docker-compose.yml`
+- [x] Docker Compose 包含 Milvus、etcd、MinIO、PostgreSQL
+- [ ] 验证本机容器全部启动并健康
 
-### 1.3 前端初始化
+### 前端
 
-- [ ] 创建 `frontend/` 项目（Vite + React + TypeScript）
-- [ ] 配置 Tailwind CSS
-- [ ] 配置 TypeScript
-- [ ] 创建基础目录结构（components、hooks、api、types）
-
-### 1.4 基础设施验证
-
-- [ ] Milvus 连接成功
-- [ ] .env 环境变量加载正常
-- [ ] 基础日志输出正常
+- [x] 创建 `frontend/` 项目（Vite + React + TypeScript）
+- [x] 配置 Tailwind CSS
+- [x] 创建基础组件、API、context、types 目录
+- [ ] 补齐或清理未使用的前端组件入口
 
 ---
 
-## 阶段 2 — 火山引擎 Embedding + Milvus 存储
+## 阶段 2 — Embedding + Milvus 存储
 
-### 2.1 Embedding 封装
+### Embedding
 
-- [ ] 实现 `volcengine_client.py`（API 调用 + 分批 + 重试）
-- [ ] 验证调用成功，返回 1024 维向量
+- [x] 实现 `vectorstore/embedding.py`（Embedding API 调用 + 分批 + 重试）
+- [x] 实现同步与异步 embedding wrapper
+- [x] 实现本地 embedding cache 类
+- [ ] 使用真实 API key 验证返回 1024 维向量
 
-### 2.2 Milvus Schema
+### News Collection
 
-- [ ] 定义 Collection Schema（id、embedding、title、content、source、language、category、published_at）
-- [ ] 配置向量索引（IVF_FLAT, COSINE）
-- [ ] 配置全文索引（title, content）
-
-### 2.3 向量 CRUD
-
-- [ ] 实现插入单条
-- [ ] 实现批量插入
-- [ ] 实现 content_hash 去重
+- [x] 定义 `news_articles` Collection schema
+- [x] 配置向量索引（IVF_FLAT + COSINE）
+- [x] 实现向量搜索
+- [x] 实现批量插入
+- [x] 写入时生成 `content_hash`
+- [ ] 实现真正的 content_hash 去重 / upsert
 - [ ] 实现增量更新
 
-### 2.4 数据导入
+### Chunk Collection / RSS 入库
 
-- [ ] 加载 HuggingFace ag_news 数据集
-- [ ] 实现文本清洗和分块
-- [ ] 批量调用 Embedding API
-- [ ] 写入 Milvus（1万条）
-- [ ] 验证：`collection.num_entities == 10000`
+- [x] 定义 `news_chunks` Collection schema
+- [x] 实现 chunk 切分与 chunk store
+- [x] 实现 RSS 全文采集 → MinIO → Chunk → Embedding → Milvus 导入脚本
+- [ ] 将 `news_chunks` 接入主查询 API 或统一检索入口
+
+### 数据导入
+
+- [x] HuggingFace AG News seed 脚本
+- [x] DatasetCollector 采集器
+- [ ] 验证 Milvus 中已成功写入 1 万条记录
+- [ ] 建立可重复的数据初始化命令和验收脚本
 
 ---
 
 ## 阶段 3 — 多路召回
 
-### 3.1 三路召回
-
-- [ ] 实现语义召回（向量 COSINE 搜索）
-- [ ] 实现关键词召回（Milvus text_search）
-- [ ] 实现标题精确匹配（Milvus expr like）
-
-### 3.2 RRF 融合
-
-- [ ] 实现 RRF 融合算法
-- [ ] 配置权重（语义 0.5 / 关键词 0.3 / 标题 0.2）
-- [ ] 实现结果去重
-
-### 3.3 过滤
-
-- [ ] 实现时间范围过滤
-- [ ] 实现来源过滤
-- [ ] 实现语言过滤
-- [ ] 实现分类过滤
-
-### 3.4 召回验证
-
-- [ ] 三路都有结果
-- [ ] RRF 融合排序合理
-- [ ] 过滤功能正常
-- [ ] Precision@5 ≥ 0.8（运行 `scripts/evaluate_retrieval.py`）
+- [x] 语义召回（向量 COSINE 搜索）
+- [x] 关键词召回（Milvus expr `like` 查询）
+- [x] 标题精确匹配（Milvus expr `like` 查询）
+- [x] RRF 融合算法
+- [x] 配置召回权重（语义 0.5 / 关键词 0.3 / 标题 0.2）
+- [x] 多 query 结果按标题去重
+- [x] 来源、语言、分类过滤逻辑
+- [ ] 时间范围过滤
+- [ ] 替换伪全文检索为 Milvus 正式全文检索或外部 BM25
+- [ ] 三路召回真实数据验证
+- [ ] Precision@5 / Recall / NDCG 达标验证
 
 ---
 
-## 阶段 4 — LangGraph Agent
+## 阶段 4 — News RAG LangGraph Agent
 
-### 4.1 LLM 封装
+### LLM 与 Prompt
 
-- [ ] 实现 `llm/client.py`（DeepSeek + 缓存）
-- [ ] 实现流式输出
-- [ ] 实现 LLM 缓存（`data/llm_cache/v1/`）
-- [ ] 验证调用成功
+- [x] 实现 DeepSeek LLM client
+- [x] 实现 OpenAI LLM client
+- [x] 实现 Qwen LLM client
+- [x] 支持 `.env` 切换 provider/model
+- [x] 实现流式输出
+- [x] 实现 LLM 文件缓存
+- [x] Prompt 模板目录与 v1 模板
+- [ ] Prompt 版本化 v2
 
-### 4.2 Prompt 模板
-
-- [ ] 创建 `src/agent/templates/` 目录
-- [ ] 编写 `generate_answer.txt`（基于检索结果生成答案 + 引用）
-- [ ] 编写 `evaluate_relevance.txt`（评估检索结果相关性）
-
-### 4.3 Agent 工作流
+### Agent 工作流
 
 - [x] 定义 AgentState
-- [x] 实现 retrieve 节点（多路召回）
-- [x] 实现 evaluate 节点（评估相关性）
-- [x] 实现 generate 节点（生成答案）
-- [x] 实现 reflect 节点（自我反思）
-- [x] 实现条件边（结果不够则重新检索）
-- [x] 编译图：`graph.compile()`
-
-### 4.4 Agent 验证
-
-- [ ] CLI 测试：输入问题 → 带来源的答案
-- [ ] LLM 缓存生效（第二次相同查询不调 API）
+- [x] 实现 query analysis 节点
+- [x] 实现 retrieval planning 节点
+- [x] 实现 retrieve 节点
+- [x] 实现 evaluate relevance 节点
+- [x] 实现 re_search 节点
+- [x] 实现 answer generation 节点
+- [x] 实现 self reflection 节点
+- [x] 编译 LangGraph
+- [x] 支持历史上下文参数
+- [ ] 流式路径接入完整 LangGraph 质量闭环（当前跳过 evaluate/re_search/self_reflect）
+- [ ] CLI 或 API 端到端验证：问题 → 检索 → 带来源答案
+- [ ] 验证 LLM 缓存命中行为
 
 ---
 
 ## 阶段 5 — FastAPI
 
-### 5.1 应用框架
-
-- [ ] 创建 `api/app.py`
-- [ ] 配置 trace_id 中间件
-- [ ] 配置结构化日志中间件
-- [ ] 配置 CORS
-
-### 5.2 接口实现
-
-- [ ] 实现 `POST /api/query`（SSE 流式）
-- [ ] 实现 `GET /api/stats`（返回数量统计）
-- [ ] 实现 `GET /api/health`
-
-### 5.3 API 验证
-
-- [ ] `curl localhost:8000/api/stats` 返回正确数据
-- [ ] `curl -X POST /api/query -d '{"query":"AI news"}'` 返回 SSE 流
-- [ ] 响应头包含 `X-Trace-ID`
+- [x] 创建 `api/app.py`
+- [x] 配置 CORS
+- [x] 配置 trace_id 响应头
+- [x] 配置结构化日志
+- [x] 实现 `POST /api/query`（SSE 流式）
+- [x] 实现 `GET /api/stats`
+- [x] 实现 `GET /api/health`
+- [x] 实现 `POST /api/ingest/trigger`
+- [x] 实现 `GET /api/ingest/status`
+- [x] 注册 auth router
+- [x] 注册 research router
+- [ ] `/api/ingest/trigger` 从“采集计数”升级为“采集 + embedding + 入库”的完整异步任务
+- [ ] 用 curl 或集成测试验证 `/api/query` SSE 输出
+- [ ] 用 curl 或集成测试验证 `X-Trace-ID`
 
 ---
 
 ## 阶段 6 — React 前端
 
-### 6.1 基础布局
+### 已实现
 
-- [ ] 实现 7:3 分栏布局
-- [ ] 配置 Clean Light 主题色（#ffffff + #2563eb）
-- [ ] 实现来源面板折叠按钮
+- [x] 7:3 分栏主布局
+- [x] Clean Light 主题
+- [x] 登录 / 注册页面
+- [x] AuthContext 与 token 本地存储
+- [x] ChatWindow
+- [x] 消息气泡
+- [x] SSE 流式文本显示
+- [x] Markdown 渲染
+- [x] 输入框、发送按钮、加载状态
+- [x] SourcePanel
+- [x] SourceCard
+- [x] HealthBadge
+- [x] IngestPanel
+- [x] Dashboard 组件
+- [x] HistoryPanel 组件
 
-### 6.2 对话组件
+### 待补齐
 
-- [ ] 实现 `ChatWindow.tsx`
-- [ ] 实现消息气泡（用户 / AI 区分样式）
-- [ ] 实现流式文本逐字显示
-- [ ] 实现输入框（回车发送）
-- [ ] 实现发送按钮和加载状态
-
-### 6.3 来源组件
-
-- [ ] 实现 `SourcePanel.tsx`（包裹卡片）
-- [ ] 实现 `SourceCard.tsx`（折叠式，悬停展开）
-- [ ] 默认显示：标题 + 来源
-- [ ] 悬停展开：时间 + 摘要 + 分类标签 + 相关度分数
-
-### 6.4 API 层
-
-- [ ] 实现 `api/client.ts`
-- [ ] 实现 SSE 流式处理
-- [ ] 实现错误处理和重连
-
-### 6.5 前端验证
-
-- [ ] 完整查询流程跑通（输入 → 发送 → 流式显示答案 → 显示来源卡片）
-- [ ] 响应式布局正常
-- [ ] 来源面板折叠/展开正常
+- [ ] FilterBar 接入主查询流程
+- [ ] CompareView 接入主界面
+- [ ] Deep Research 入口页面
+- [ ] 研究进度展示（Planner → Retriever → Analyst → Checker → Writer）
+- [ ] Markdown 报告预览
+- [ ] PPT 大纲 JSON 预览
+- [ ] 前端完整查询流程验收
+- [ ] 响应式布局验收
 
 ---
 
-## 阶段 7 — 调试与可观测性
+## 阶段 7 — 认证、用户与任务
 
-### 7.1 日志与追踪
+- [x] 注册接口：`POST /api/auth/register`
+- [x] 登录接口：`POST /api/auth/login`
+- [x] Token 刷新接口：`POST /api/auth/refresh`
+- [x] Bearer token 解析依赖：`get_current_user`
+- [x] 自动创建公司
+- [x] Refresh token hash 存储
+- [x] ResearchTask ORM
+- [x] Deep Research 任务写入 `research_tasks`
+- [ ] refresh token 与 token_id 严格绑定校验
+- [ ] 请求级认证中间件统一注入 user_id/company_id
+- [ ] 公司配额检查
+- [ ] 任务完成后 increment quota
+- [ ] 审计日志写入
+- [ ] 用户偏好设置页
+- [ ] Planner 读取并注入用户偏好
 
-- [ ] 集成 LangSmith tracing（开发阶段）
-- [ ] 敏感信息脱敏日志
-- [ ] 实现错误分级（可忽略 / 需处理）
+---
 
-### 7.2 检索评估
+## 阶段 8 — Deep Research / Multi-Tool
 
-- [ ] 实现 `scripts/evaluate_retrieval.py`
-- [ ] 准备测试查询集（20-30 条）
-- [ ] 输出 Precision/Recall 指标
+### 子 Tool
 
-### 7.3 生产安全
+- [x] `planner` Tool：意图分析、受众识别、研究计划、子问题拆解
+- [x] `retriever` Tool：根据子问题检索证据并去重
+- [x] `analyst` Tool：LLM 分析趋势、机会、风险，带 fallback
+- [x] `checker` Tool：LLM 核查覆盖、可信度、冲突、缺口，带 fallback
+- [ ] `writer` Tool：当前仍是 stub，需要生成真实 Markdown 报告、PPT 大纲和逐页内容
+- [ ] 子 Tool 输出格式统一并做 schema 校验
+- [ ] Tool 调用重试机制
+- [ ] JSON 解析失败统一降级
+- [ ] 单步重试 API：`POST /api/research/{task_id}/retry?step=xxx`
+- [ ] 失败步骤和 retry_count 写入任务表
 
-- [ ] 验证 `.env.prod` 环境 DEBUG=false
-- [ ] 验证生产环境自动关闭 LLM 缓存
+### Orchestrator / API
+
+- [x] ResearchState 定义
+- [x] Research graph 骨架
+- [x] `POST /api/research` API 入口
+- [x] `GET /api/research/{task_id}` 查询任务结果
+- [ ] `POST /api/research` 接入完整 research graph（当前只同步执行 planner + retriever）
+- [ ] Checker 发现缺口时补检索闭环
+- [ ] Writer 输出写入 result_markdown / result_slides
+- [ ] gaps_identified / conflicts_detected 写入任务表
+- [ ] Deep Research SSE 或任务进度流
+
+### 报告质量评估
+
+- [ ] 自动指标：证据覆盖率、来源多样性、时效性、可信度、缺口识别率
+- [ ] 质量分数写入 `research_tasks`
+- [ ] LLM 评审报告质量
+- [ ] 用户反馈评分
+
+---
+
+## 阶段 9 — 数据采集扩展
+
+- [x] RSS 采集器
+- [x] Hacker News API 采集器
+- [x] HuggingFace Dataset 采集器
+- [x] RSS 全文抓取与导入脚本
+- [x] MinIO 原文存储
+- [ ] AI 行业 RSS 采集 pipeline 接入 `ai_industry_articles`
+- [ ] 定时采集调度
+- [ ] Reddit API 采集器
+- [ ] Scrapy 爬虫
+- [ ] 数据来源可信度评分
+
+---
+
+## 阶段 10 — 调试、评估与可观测性
+
+- [x] LangSmith tracing 配置函数
+- [x] 敏感信息脱敏日志
+- [x] 基础错误类型
+- [x] `scripts/evaluate_retrieval.py`
+- [x] 默认测试查询集
+- [x] Precision / Recall / NDCG 计算
+- [ ] 修复 pytest 收集失败
+- [ ] 增加 API 集成测试
+- [ ] 增加 Agent 图测试
+- [ ] 增加 Deep Research 工具测试
+- [ ] 验证 `.env.prod` 中 DEBUG=false
+- [ ] 验证生产环境关闭 LLM 缓存
 - [ ] 验证生产环境禁止全量 dump
 
 ---
 
-## 阶段 8 — 扩展功能（完整版）
+## 阶段 11 — 部署与运维
 
-### 数据采集扩展
+- [x] Docker Compose 本地基础服务
+- [ ] 后端 Dockerfile
+- [ ] 前端生产构建配置
+- [ ] Nginx 反向代理
+- [ ] 域名与 HTTPS
+- [ ] CI/CD
+- [ ] 部署文档
+- [ ] Redis LLM 响应缓存
+- [ ] Redis 公司级限流
+- [ ] Redis 分布式锁
 
-- [ ] 实现 RSS 采集器（中英文源）
-- [ ] 实现 Hacker News API 采集器
-- [ ] 实现 Reddit API 采集器
-- [ ] 实现 Scrapy 爬虫（中文字站）
-- [ ] 实现定时采集调度
+---
 
-### LLM 扩展
+## 设计决策记录
 
-- [ ] 实现 OpenAI 客户端（备选）
-- [ ] 实现 Qwen 客户端（备选）
-- [ ] 实现 `.env` 切换模型
+### Multi-Agent → Supervisor + Multi-Tool
 
-### Agent 扩展
+- [x] 决策：当前阶段采用 1 个 Supervisor + 多个 Tool Function，而不是多个独立 Agent 自由对话。
+- [x] 原因：流程相对固定，中央调度更可控，更方便调试、缓存和评估。
+- [ ] 后续：等 Deep Research 主链路稳定后，再评估是否拆分领域型子 Agent。
 
-- [ ] 实现意图识别（LLM 结构化输出）
-- [ ] 实现规则路由 + LLM 兜底
-- [ ] 实现多源对比节点
-- [ ] 实现深度自我反思
-- [ ] Prompt 版本化管理
-- [ ] 实现历史对话上下文
+### JWT vs API Key
 
-### 召回扩展
+- [x] 决策：采用 JWT（access_token + refresh_token），而不是简单 API Key。
+- [x] 原因：ToB 场景需要多用户、团队、配额、权限和 token 过期机制。
+- [ ] 后续：补齐 refresh token 严格校验、配额和审计日志。
 
-- [ ] 实现 Re-ranker 精排
-- [ ] 实现时间衰减加权
-- [ ] 实现来源质量加权
+### PPT 交付
 
-### 前端扩展
+- [x] 决策：第一阶段后端生成结构化 JSON，前端渲染预览。
+- [ ] 后续：生成可下载 PPTX 或接入导出服务。
 
-- [ ] 实现过滤栏（语言、时间、来源、分类）
-- [ ] 实现多源对比视图
-- [ ] 实现数据概览仪表盘
-- [ ] 实现历史查询记录
+---
 
-### 部署
+## 里程碑
+
+| 里程碑 | 状态 | 验收标准 |
+|--------|------|---------|
+| M1: News RAG 骨架 | 已完成 | 后端、前端、Milvus、LLM、基础 Agent 代码就绪 |
+| M2: News RAG 可演示 | 待验证 | 前后端完整查询流程跑通，答案带来源 |
+| M3: Deep Research 骨架 | 已完成 | schema、认证、research graph、tool 函数和 API 入口就绪 |
+| M4: Deep Research MVP | 未完成 | planner → retriever → analyst → checker → writer 完整报告闭环 |
+| M5: ToB MVP | 未完成 | 登录、配额、任务历史、报告预览、质量评估、部署文档 |
 
 - [ ] 编写部署文档
 - [ ] 配置 CI/CD
