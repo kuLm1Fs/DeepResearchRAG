@@ -13,30 +13,46 @@ A news RAG system supporting Chinese/English, multi-source data collection, vect
 
 ## Quick Start
 
-### 1. Start Milvus
+### 1. Start Docker Services (Milvus + PostgreSQL)
 
 ```bash
 cd docker
 docker compose up -d
+
+# 确认服务运行中
+docker compose ps
 ```
 
-### 2. Backend Setup
+### 2. Initialize PostgreSQL Database
+
+```bash
+# 建表（如果提示 database 不存在，先建数据库）
+docker exec -i $(docker compose ps -q postgres) \
+  psql -U rag_user -d rag_news < docs/schema.sql
+
+# 或分步执行：
+docker exec -i $(docker compose ps -q postgres) \
+  psql -U rag_user -c "CREATE DATABASE rag_news;"
+docker exec -i $(docker compose ps -q postgres) \
+  psql -U rag_user -d rag_news < docs/schema.sql
+```
+
+### 3. Backend Setup
 
 ```bash
 cd backend
-uv sync                    # 安装依赖（Rust 实现，比 pip 快）
-cp configs/.env.example .env
-# Edit .env with your API keys
-uv run uvicorn src.api.app:app --reload
+
+# 复制配置并填写 API keys
+cp configs/.env.example configs/.env.dev
+
+# 安装依赖
+make install   # 或：uv sync
+
+# 开发模式启动（自动设置 PYTHONPATH）
+make dev      # 或：uv run uvicorn src.api.app:app --reload
 ```
 
-> **Tip**: 生产部署使用 `uv sync --frozen` 锁定依赖版本，确保开发/生产环境一致。
-
-### 3. Seed Data
-
-```bash
-uv run python scripts/seed_data.py --limit 10000
-```
+> **Tip**: 使用 `make dev` 不需要手动设置 PYTHONPATH，Makefile 已自动 export。
 
 ### 4. Frontend Setup
 
@@ -46,12 +62,6 @@ npm install
 npm run dev
 ```
 
-## API Endpoints
-
-- `POST /api/query` - Query with SSE streaming
-- `GET /api/stats` - Collection statistics
-- `GET /api/health` - Health check
-
 ## Python Environment
 
 后端使用 [uv](https://github.com/astral-sh/uv) 管理依赖：
@@ -59,6 +69,11 @@ npm run dev
 - `uv run <command>` - 在虚拟环境中运行命令
 - `uv sync --frozen` - 生产部署锁定版本
 
-## Architecture
+Makefile 命令：
+- `make install` - 安装依赖
+- `make dev` - 开发模式启动
+- `make lint` - 代码检查
+
+## API Endpoints
 
 User Query → FastAPI → LangGraph Agent → Multi-path Retrieval → RRF Fusion → Answer Generation
