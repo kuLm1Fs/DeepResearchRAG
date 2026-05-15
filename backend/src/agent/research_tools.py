@@ -270,17 +270,122 @@ def analyst(evidence: list[dict], focus: str = "all") -> dict[str, Any]:
         }
     """
     task_id = str(uuid.uuid4())[:8]
+
+    if not evidence:
+        return {
+            "task_id": task_id,
+            "status": "success",
+            "data": {
+                "trends": [],
+                "opportunities": [],
+                "risks": [],
+                "summary": "证据为空，无法生成分析"
+            },
+            "errors": [],
+            "gaps": ["需要先通过 retriever 获取证据数据"]
+        }
+
+    if not settings.deepseek_api_key and not settings.openai_api_key and not settings.qwen_api_key:
+        return _stub_analyst(focus)
+
+    try:
+        return _call_analyst(evidence, focus)
+    except Exception as e:
+        logger.error("analyst LLM call failed", error=str(e))
+        return _error_analyst(str(e))
+
+
+def _call_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
+    return asyncio.run(_async_analyst(evidence, focus))
+
+
+async def _async_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
+    """调用 LLM 分析证据（async）"""
+    from ..llm import create_llm
+
+    llm = create_llm(
+        provider=settings.llm_provider,
+        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
+        model=settings.llm_model
+    )
+
+    evidence_snippets = []
+    for i, e in enumerate(evidence[:10]):
+        snippet = f"[{i+1}] {e.get('title', '')}: {e.get('content', '')[:300]}..."
+        evidence_snippets.append(snippet)
+    evidence_text = "\n".join(evidence_snippets)
+
+    focus_instruction = {
+        "all": "趋势、机会和风险",
+        "trends": "趋势",
+        "opportunities": "机会",
+        "risks": "风险",
+    }.get(focus, "趋势、机会和风险")
+
+    messages = [
+        {
+            "role": "system",
+            "content": f"""你是一个专业的行业分析师。根据以下证据材料，进行{focus_instruction}分析。
+
+请以 JSON 格式输出，不要包含其他内容：
+
+{{
+  "trends": [{{"topic": "趋势主题", "description": "趋势描述（200字内）", "confidence": 0.85}}],
+  "opportunities": [{{"title": "机会标题", "description": "机会描述（200字内）", "evidence_count": 3}}],
+  "risks": [{{"title": "风险标题", "description": "风险描述（200字内）", "severity": "high/medium/low"}}],
+  "summary": "整体总结（300字内）"
+}}"""
+        },
+        {
+            "role": "user",
+            "content": f"证据材料：\n{evidence_text}\n\n请进行{focus_instruction}分析。"
+        }
+    ]
+
+    response = await llm.chat(messages)
+
+    try:
+        if "```json" in response:
+            json_str = response.split("```json")[1].split("```")[0].strip()
+        elif "```" in response:
+            json_str = response.split("```")[1].split("```")[0].strip()
+        else:
+            json_str = response.strip()
+        data = json.loads(json_str)
+        return {
+            "task_id": str(uuid.uuid4())[:8],
+            "status": "success",
+            "data": data,
+            "errors": [],
+            "gaps": []
+        }
+    except json.JSONDecodeError:
+        logger.warning("analyst JSON parse failed, using stub")
+        return _stub_analyst(focus)
+
+
+def _stub_analyst(focus: str) -> dict[str, Any]:
     return {
-        "task_id": task_id,
+        "task_id": str(uuid.uuid4())[:8],
         "status": "success",
         "data": {
-            "trends": [],
+            "trends": [{"topic": "趋势待分析", "description": "需要配置 LLM API key 获取真实分析", "confidence": 0.5}],
             "opportunities": [],
             "risks": [],
-            "summary": "证据不足，无法生成分析（Stub）"
+            "summary": "analyst 处于 stub 模式，需要配置 LLM API key"
         },
         "errors": [],
-        "gaps": ["需要真实证据数据才能生成分析"]
+        "gaps": ["需要配置 LLM API key 以获得真实分析"]
+    }
+
+
+def _error_analyst(error: str) -> dict[str, Any]:
+    return {
+        "task_id": str(uuid.uuid4())[:8],
+        "status": "error",
+        "data": None,
+        "errors": [error],
+        "gaps": ["analyst 调用失败"]
     }
 
 
