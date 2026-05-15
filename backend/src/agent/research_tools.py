@@ -578,6 +578,152 @@ def _call_writer(analysis: dict, check_result: dict | None, output_format: str) 
     return asyncio.run(_async_writer(analysis, check_result, output_format))
 
 
+async def _build_ppt_content(
+    analysis: dict,
+    check_result: dict | None,
+    llm
+) -> tuple[dict, list[dict]]:
+    """构建 PPT 大纲和逐页内容（LLM 驱动）"""
+
+    # 提取 analyst 数据
+    data = analysis.get("data", {}) if isinstance(analysis, dict) else {}
+    trends = data.get("trends", [])
+    opportunities = data.get("opportunities", [])
+    risks = data.get("risks", [])
+    summary = data.get("summary", "")
+    audience = data.get("audience", "行业研究者")
+
+    # 提取 checker 数据
+    check_data = check_result.get("data", {}) if isinstance(check_result, dict) and check_result else {}
+    gaps = check_data.get("gaps", [])
+    recommendations = check_data.get("recommendations", [])
+
+    # 格式化数据
+    trends_text = "\n".join([
+        f"- **{t.get('topic', '未知趋势')}**：{t.get('description', '')} (置信度: {t.get('confidence', 0):.0%})"
+        for t in trends
+    ]) if trends else "暂无趋势数据"
+
+    opportunities_text = "\n".join([
+        f"- **{o.get('title', '未知机会')}**：{o.get('description', '')} (证据数: {o.get('evidence_count', 0)})"
+        for o in opportunities
+    ]) if opportunities else "暂无机会数据"
+
+    risks_text = "\n".join([
+        f"- **{r.get('title', '未知风险')}**：{r.get('description', '')} (严重程度: {r.get('severity', 'unknown')})"
+        for r in risks
+    ]) if risks else "暂无风险数据"
+
+    gaps_text = "\n".join([f"- {g}" for g in gaps]) if gaps else "暂无缺口"
+    recommendations_text = "\n".join([f"- {r}" for r in recommendations]) if recommendations else "暂无建议"
+
+    messages = [
+        {
+            "role": "system",
+            "content": f"""你是一个专业的 PPT 设计师。根据以下研究分析数据，生成一份结构完整的 PPT 大纲。
+
+要求：
+1. 生成 8-15 页 PPT
+2. 页面结构：封面、目录、趋势分析（2-3页）、机会分析（2页）、风险分析（1-2页）、核查结果（1页）、建议（1页）、结语
+3. 每页包含：page、title、bullets（3-5条）、speaker_notes（100字内）、sources（留空）
+4. 使用中文撰写
+5. audience: {audience}
+
+分析数据：
+趋势分析：
+{trends_text}
+
+机会分析：
+{opportunities_text}
+
+风险分析：
+{risks_text}
+
+核查结果：
+{gaps_text}
+
+建议：
+{recommendations_text}
+
+请以 JSON 格式输出 PPT 大纲，不要包含其他内容：
+{{
+  "title": "PPT 标题",
+  "audience": "受众",
+  "total_pages": 页数,
+  "estimated_duration_minutes": 预估分钟数,
+  "slides": [
+    {{
+      "page": 1,
+      "title": "页面标题",
+      "bullets": ["要点1", "要点2", "要点3"],
+      "speaker_notes": "演讲者备注",
+      "sources": []
+    }}
+  ]
+}}"""
+        },
+        {
+            "role": "user",
+            "content": "请生成 PPT 大纲和逐页内容。"
+        }
+    ]
+
+    response = await llm.chat(messages)
+
+    try:
+        if "```json" in response:
+            json_str = response.split("```json")[1].split("```")[0].strip()
+        elif "```" in response:
+            json_str = response.split("```")[1].split("```")[0].strip()
+        else:
+            json_str = response.strip()
+
+        ppt_data = json.loads(json_str)
+
+        ppt_outline = {
+            "title": ppt_data.get("title", "研究报告"),
+            "audience": ppt_data.get("audience", audience),
+            "total_pages": ppt_data.get("total_pages", len(ppt_data.get("slides", []))),
+            "estimated_duration_minutes": ppt_data.get("estimated_duration_minutes", 20),
+            "slides": ppt_data.get("slides", [])
+        }
+
+        slides = ppt_outline["slides"]
+
+        return ppt_outline, slides
+
+    except (json.JSONDecodeError, Exception) as e:
+        logger.warning("PPT generation failed, using fallback", error=str(e))
+        # Fallback: 生成默认 PPT 结构
+        return _generate_fallback_ppt(audience)
+
+
+def _generate_fallback_ppt(audience: str) -> tuple[dict, list[dict]]:
+    """生成默认 PPT 结构（LLM 生成失败时 fallback）"""
+    slides = [
+        {"page": 1, "title": "封面", "bullets": ["研究报告标题", "副标题/日期", "演讲者信息"], "speaker_notes": "开场封面页，介绍研究主题和背景", "sources": []},
+        {"page": 2, "title": "目录", "bullets": ["趋势分析", "机会分析", "风险分析", "事实核查", "建议与总结"], "speaker_notes": "目录页，概述报告结构", "sources": []},
+        {"page": 3, "title": "趋势分析（一）", "bullets": ["核心趋势一", "核心趋势二", "核心趋势三"], "speaker_notes": "深入分析主要趋势及其影响", "sources": []},
+        {"page": 4, "title": "趋势分析（二）", "bullets": ["次要趋势一", "次要趋势二", "趋势预测"], "speaker_notes": "补充分析其他重要趋势", "sources": []},
+        {"page": 5, "title": "机会分析（一）", "bullets": ["市场机会一", "市场机会二", "机会优先级"], "speaker_notes": "分析主要市场机会及可行性", "sources": []},
+        {"page": 6, "title": "机会分析（二）", "bullets": ["新兴机会", "潜在机会", "机会评估"], "speaker_notes": "补充分析新兴和潜在机会", "sources": []},
+        {"page": 7, "title": "风险分析", "bullets": ["主要风险一", "主要风险二", "风险缓解策略"], "speaker_notes": "分析主要风险及应对措施", "sources": []},
+        {"page": 8, "title": "事实核查结果", "bullets": ["证据覆盖率", "可信度评估", "缺口与不足"], "speaker_notes": "展示核查结果，指出信息缺口", "sources": []},
+        {"page": 9, "title": "建议", "bullets": ["短期建议", "中期建议", "长期建议"], "speaker_notes": "基于分析给出具体行动建议", "sources": []},
+        {"page": 10, "title": "结语", "bullets": ["核心结论", "下一步行动", "Q&A"], "speaker_notes": "总结核心观点，开放讨论", "sources": []},
+    ]
+
+    ppt_outline = {
+        "title": "研究报告",
+        "audience": audience,
+        "total_pages": len(slides),
+        "estimated_duration_minutes": 25,
+        "slides": slides
+    }
+
+    return ppt_outline, slides
+
+
 async def _async_writer(analysis: dict, check_result: dict | None, output_format: str) -> dict[str, Any]:
     """调用 LLM 生成 Markdown 报告（async）"""
     from ..llm import create_llm
@@ -609,13 +755,23 @@ async def _async_writer(analysis: dict, check_result: dict | None, output_format
         coverage, credibility_issues, conflicts, gaps, recommendations, llm
     )
 
+    # PPT 生成（仅当 output_format 为 ppt 或 both 时）
+    if output_format in ("ppt", "both"):
+        try:
+            ppt_outline, slides = await _build_ppt_content(analysis, check_result, llm)
+        except Exception as e:
+            logger.error("PPT generation failed", error=str(e))
+            ppt_outline, slides = {"title": "研究汇报", "pages": []}, []
+    else:
+        ppt_outline, slides = {"title": "研究汇报", "pages": []}, []
+
     return {
         "task_id": str(uuid.uuid4())[:8],
         "status": "success",
         "data": {
             "report_md": report_md,
-            "ppt_outline": {"title": "研究汇报", "pages": []},
-            "slides": []
+            "ppt_outline": ppt_outline,
+            "slides": slides
         },
         "errors": [],
         "gaps": []
@@ -783,6 +939,7 @@ def _stub_writer(analysis: dict, check_result: dict | None) -> dict[str, Any]:
     trends = data.get("trends", [])
     opportunities = data.get("opportunities", [])
     risks = data.get("risks", [])
+    audience = data.get("audience", "行业研究者")
 
     check_data = check_result.get("data", {}) if isinstance(check_result, dict) and check_result else {}
     coverage = check_data.get("coverage", 0.0)
@@ -817,13 +974,16 @@ def _stub_writer(analysis: dict, check_result: dict | None) -> dict[str, Any]:
 {recommendations_text}
 """
 
+    # 生成 fallback PPT
+    ppt_outline, slides = _generate_fallback_ppt(audience)
+
     return {
         "task_id": str(uuid.uuid4())[:8],
         "status": "success",
         "data": {
             "report_md": report_md,
-            "ppt_outline": {"title": "研究汇报", "pages": []},
-            "slides": []
+            "ppt_outline": ppt_outline,
+            "slides": slides
         },
         "errors": [],
         "gaps": ["writer 处于 stub 模式，需要配置 LLM API key"]
