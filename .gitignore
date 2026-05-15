@@ -1,3 +1,13 @@
+# Configuration Files
+.env
+.env.local
+.env.*.local
+**/.env.dev
+**/.env.prod
+**/.env.test
+configs/
+!configs/.env.example
+
 # Python
 __pycache__/
 *.py[cod]
@@ -19,7 +29,6 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-.env
 .venv
 env/
 venv/
@@ -51,6 +60,8 @@ Thumbs.db
 data/
 *.json
 *.jsonl
+!frontend/package.json
+!frontend/package-lock.json
 
 # Logs
 *.log
@@ -65,7 +76,7 @@ minio_data/
 .coverage
 htmlcov/
 .mypy_cache/
-.ruff_cache/backend/.env.dev
-configs/.env.dev
-**/.env*
+.ruff_cache/
+
+# Task files
 task-*.txt
