@@ -413,18 +413,130 @@ def checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
         }
     """
     task_id = str(uuid.uuid4())[:8]
+
+    # 空 evidence → 返回 stub（不调用 LLM）
+    if not evidence:
+        return {
+            "task_id": task_id,
+            "status": "success",
+            "data": {
+                "coverage": 0.0,
+                "credibility_issues": [],
+                "conflicts": [],
+                "gaps": ["证据为空，无法进行核查"],
+                "recommendations": ["请先通过 retriever 获取证据数据"]
+            },
+            "errors": [],
+            "gaps": ["证据为空"]
+        }
+
+    # 无 LLM key → 返回 stub
+    if not settings.deepseek_api_key and not settings.openai_api_key and not settings.qwen_api_key:
+        return _stub_checker(claims, evidence)
+
+    try:
+        return _call_checker(claims, evidence)
+    except Exception as e:
+        logger.error("checker LLM call failed", error=str(e))
+        return _error_checker(str(e))
+
+
+def _call_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
+    """调用 LLM 进行事实核查（同步包装）"""
+    return asyncio.run(_async_checker(claims, evidence))
+
+
+async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
+    """调用 LLM 进行事实核查（async）"""
+    from ..llm import create_llm
+
+    llm = create_llm(
+        provider=settings.llm_provider,
+        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
+        model=settings.llm_model
+    )
+
+    # 构建 claims 文本（最多 10 条）
+    claims_snippets = []
+    for i, c in enumerate(claims[:10]):
+        claim_text = c.get("claim", c.get("title", c.get("text", str(c))))
+        claims_snippets.append(f"[{i+1}] {claim_text}")
+    claims_text = "\n".join(claims_snippets)
+
+    # 构建 evidence 文本（最多 10 条，每条 title + content 300字）
+    evidence_snippets = []
+    for i, e in enumerate(evidence[:10]):
+        snippet = f"[{i+1}] {e.get('title', '')}: {e.get('content', '')[:300]}..."
+        evidence_snippets.append(snippet)
+    evidence_text = "\n".join(evidence_snippets)
+
+    messages = [
+        {
+            "role": "system",
+            "content": """你是一个专业的事实核查员。根据提供的证据材料对待检查的声明进行核查。
+
+请以 JSON 格式输出，不要包含其他内容：
+
+{
+  "coverage": 0.0-1.0,  // 证据覆盖率
+  "credibility_issues": [{"source": "来源", "issue": "问题描述"}],
+  "conflicts": [{"claim_a": "声明A", "claim_b": "声明B", "resolution": "冲突解决说明"}],
+  "gaps": ["缺口描述"],
+  "recommendations": ["建议描述"]
+}"""
+        },
+        {
+            "role": "user",
+            "content": f"待检查的声明：\n{claims_text}\n\n支持证据：\n{evidence_text}\n\n请进行事实核查。"
+        }
+    ]
+
+    response = await llm.chat(messages)
+
+    try:
+        if "```json" in response:
+            json_str = response.split("```json")[1].split("```")[0].strip()
+        elif "```" in response:
+            json_str = response.split("```")[1].split("```")[0].strip()
+        else:
+            json_str = response.strip()
+        data = json.loads(json_str)
+        return {
+            "task_id": str(uuid.uuid4())[:8],
+            "status": "success",
+            "data": data,
+            "errors": [],
+            "gaps": []
+        }
+    except json.JSONDecodeError:
+        logger.warning("checker JSON parse failed, using stub")
+        return _stub_checker(claims, evidence)
+
+
+def _stub_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
+    """无 LLM 时的 Stub 返回"""
     return {
-        "task_id": task_id,
+        "task_id": str(uuid.uuid4())[:8],
         "status": "success",
         "data": {
-            "coverage": 0.0,
+            "coverage": 0.5,
             "credibility_issues": [],
             "conflicts": [],
-            "gaps": ["缺少证据数据"],
-            "recommendations": ["请先导入 ai_industry_articles 数据"]
+            "gaps": ["需要配置 LLM API key 以获得真实核查"],
+            "recommendations": ["请配置 LLM API key 以启用事实核查功能"]
         },
         "errors": [],
-        "gaps": []
+        "gaps": ["需要配置 LLM API key 以获得真实核查"]
+    }
+
+
+def _error_checker(error: str) -> dict[str, Any]:
+    return {
+        "task_id": str(uuid.uuid4())[:8],
+        "status": "error",
+        "data": None,
+        "errors": [error],
+        "gaps": ["checker 调用失败"]
     }
 
 
