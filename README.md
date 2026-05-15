@@ -24,16 +24,18 @@ docker compose up -d
 
 ```bash
 cd backend
-pip install -e .
+uv sync                    # 安装依赖（Rust 实现，比 pip 快）
 cp configs/.env.example .env
 # Edit .env with your API keys
-uvicorn src.api.app:app --reload
+uv run uvicorn src.api.app:app --reload
 ```
+
+> **Tip**: 生产部署使用 `uv sync --frozen` 锁定依赖版本，确保开发/生产环境一致。
 
 ### 3. Seed Data
 
 ```bash
-python scripts/seed_data.py --limit 10000
+uv run python scripts/seed_data.py --limit 10000
 ```
 
 ### 4. Frontend Setup
@@ -49,6 +51,13 @@ npm run dev
 - `POST /api/query` - Query with SSE streaming
 - `GET /api/stats` - Collection statistics
 - `GET /api/health` - Health check
+
+## Python Environment
+
+后端使用 [uv](https://github.com/astral-sh/uv) 管理依赖：
+- `uv sync` - 安装所有依赖
+- `uv run <command>` - 在虚拟环境中运行命令
+- `uv sync --frozen` - 生产部署锁定版本
 
 ## Architecture
 
