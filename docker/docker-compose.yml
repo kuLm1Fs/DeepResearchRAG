@@ -56,7 +56,24 @@ services:
       timeout: 20s
       retries: 3
 
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rag_news
+      POSTGRES_USER: rag_user
+      POSTGRES_PASSWORD: rag_secure_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "rag_user", "-d", "rag_news"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 volumes:
   etcd_data:
   minio_data:
   milvus_data:
+  postgres_data:
