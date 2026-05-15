@@ -9,7 +9,7 @@
 - [x] News RAG 基础工程骨架已完成：FastAPI、React、Milvus、PostgreSQL、认证、采集器、LangGraph、LLM 客户端。
 - [x] News RAG 问答主链路已有实现：查询 API、SSE 流式返回、来源面板、Milvus 检索、LLM 生成。
 - [ ] News RAG 端到端稳定性仍需验证：本地服务、真实 API key、真实 Milvus 数据、前后端完整查询流程。
-- [ ] Deep Research 仍未真正产品化：已有设计、schema、部分工具函数和 API 入口，但 Writer 仍是 stub，API 只跑 planner + retriever。
+- [x] Deep Research 核心功能产品化：writer 生成 Markdown 报告 + PPT 大纲/逐页内容，API 完整链路（planner → retriever → analyst → checker → writer）已接入。
 - [ ] 自动测试未通过：`uv run pytest` 当前因 `ModuleNotFoundError: No module named 'scripts'` 在收集阶段失败。
 
 ---
@@ -228,7 +228,7 @@
 - [x] `retriever` Tool：根据子问题检索证据并去重
 - [x] `analyst` Tool：LLM 分析趋势、机会、风险，带 fallback
 - [x] `checker` Tool：LLM 核查覆盖、可信度、冲突、缺口，带 fallback
-- [ ] `writer` Tool：当前仍是 stub，需要生成真实 Markdown 报告、PPT 大纲和逐页内容
+- [x] `writer` Tool：LLM 生成 Markdown 报告（执行摘要/趋势/机会/风险/核查/建议），PPT 大纲 + 逐页内容（8-20页，fallback 10页结构）
 - [ ] 子 Tool 输出格式统一并做 schema 校验
 - [ ] Tool 调用重试机制
 - [ ] JSON 解析失败统一降级
@@ -241,7 +241,7 @@
 - [x] Research graph 骨架
 - [x] `POST /api/research` API 入口
 - [x] `GET /api/research/{task_id}` 查询任务结果
-- [ ] `POST /api/research` 接入完整 research graph（当前只同步执行 planner + retriever）
+- [x] `POST /api/research` 完整链路：异步执行 planner → retriever → analyst → checker → writer，立即返回 task_id，result_markdown 写入数据库
 - [ ] Checker 发现缺口时补检索闭环
 - [ ] Writer 输出写入 result_markdown / result_slides
 - [ ] gaps_identified / conflicts_detected 写入任务表
