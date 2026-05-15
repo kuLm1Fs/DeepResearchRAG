@@ -1,13 +1,12 @@
 .PHONY: run install dev
 
-PYTHONPATH := backend/src
+PYTHONPATH := $(shell pwd)/src
 export PYTHONPATH
 
 ## 安装依赖
 install:
 	uv sync
 
-## 开发模式启动
 dev:
 	uv run uvicorn src.api.app:app --reload
 
