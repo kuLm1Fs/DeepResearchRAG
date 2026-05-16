@@ -36,7 +36,7 @@
 - [x] JWT 认证基础设施（密码哈希、access_token、refresh_token）
 - [x] `ai_industry_articles` Milvus Collection schema + 索引 + user_id 字段
 - [x] Supervisor + Multi-Tool 架构骨架（ResearchState + planner/retriever/analyst/checker/writer + research graph）
-- [ ] Research Supervisor 主流程接入 Deep Research API
+- [x] Research Supervisor 主流程接入 Deep Research API
 
 ---
 
