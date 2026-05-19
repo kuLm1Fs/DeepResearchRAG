@@ -88,6 +88,25 @@ class ResearchGraphOrchestrationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(research_graph.should_continue(state), "writer")
 
+    async def test_nodes_notify_step_progress(self):
+        seen_steps = []
+
+        async def on_step(step, state):
+            seen_steps.append((step, state.get("query")))
+
+        async def fake_aplanner(query, user_id=None):
+            return {"data": {"sub_questions": ["q1"]}}
+
+        with patch.object(research_graph, "aplanner", fake_aplanner):
+            result = await research_graph._planner_node({
+                "query": "AI market",
+                "user_id": "u1",
+                "on_step": on_step,
+            })
+
+        self.assertEqual(result["current_step"], "planner")
+        self.assertEqual(seen_steps, [("planner", "AI market")])
+
 
 if __name__ == "__main__":
     unittest.main()

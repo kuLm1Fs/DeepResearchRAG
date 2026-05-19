@@ -11,6 +11,13 @@ from .research_tools import aplanner, retriever, aanalyst, achecker, awriter
 logger = get_logger(__name__)
 
 
+async def notify_step(state: ResearchState, step: str) -> None:
+    callback = state.get("on_step")
+    if callback is None:
+        return
+    await callback(step, state)
+
+
 def should_continue(state: ResearchState) -> Literal["retriever", "writer"]:
     """检查是否需要补充检索。"""
     check_result = state.get("check_result")
@@ -31,7 +38,7 @@ def create_research_graph():
 
     # 节点
     graph.add_node("planner", _planner_node)
-    graph.add_node("retriever", lambda state: _call_retriever(state))
+    graph.add_node("retriever", _retriever_node)
     graph.add_node("analyst", _analyst_node)
     graph.add_node("checker", _checker_node)
     graph.add_node("writer", _writer_node)
@@ -58,7 +65,13 @@ def create_research_graph():
     return graph.compile()
 
 
-async def run_research(query: str, user_id: str | None = None, company_id: str | None = None) -> dict:
+async def run_research(
+    query: str,
+    user_id: str | None = None,
+    company_id: str | None = None,
+    on_step=None,
+    return_state: bool = False,
+) -> dict:
     """
     执行完整研究流程。
 
@@ -90,14 +103,18 @@ async def run_research(query: str, user_id: str | None = None, company_id: str |
         "failed_step": None,
         "retry_count": 0,
         "error": None,
+        "on_step": on_step,
     }
 
     result = await graph.ainvoke(initial_state)
+    if return_state:
+        return result
     return result.get("final_output", {})
 
 
 # ---- Tool 调用包装 ----
 async def _planner_node(state: ResearchState) -> dict:
+    await notify_step(state, "planner")
     plan = await _call_planner(state)
     sub_questions = plan.get("sub_questions") or plan.get("research_questions") or []
     return {
@@ -129,7 +146,13 @@ def _call_retriever(state: ResearchState) -> dict:
     }
 
 
+async def _retriever_node(state: ResearchState) -> dict:
+    await notify_step(state, "retriever")
+    return _call_retriever(state)
+
+
 async def _analyst_node(state: ResearchState) -> dict:
+    await notify_step(state, "analyst")
     return {"current_step": "analyst", "analysis": await _call_analyst(state)}
 
 
@@ -145,6 +168,7 @@ async def _call_checker(state: ResearchState) -> dict:
 
 
 async def _checker_node(state: ResearchState) -> dict:
+    await notify_step(state, "checker")
     check_result = await _call_checker(state)
     return {
         "current_step": "checker",
@@ -155,6 +179,7 @@ async def _checker_node(state: ResearchState) -> dict:
 
 
 async def _writer_node(state: ResearchState) -> dict:
+    await notify_step(state, "writer")
     return {"current_step": "writer", "final_output": await _call_writer(state)}
 
 

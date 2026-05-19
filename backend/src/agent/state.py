@@ -25,3 +25,4 @@ class AgentState(TypedDict, total=False):
     source_comparison: dict[str, Any] | None  # Multi-source comparison summary
     re_search_count: int                 # Number of supplemental retrieval attempts
     runtime: Any                         # Optional injected runtime dependencies
+    node_traces: list[dict[str, Any]]    # Per-node execution trace summaries

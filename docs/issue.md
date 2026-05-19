@@ -177,3 +177,19 @@
 - **影响**: 不能可靠判断答案中的关键 claims 是否被 sources 支撑
 - **修复**: 增加轻量 claim splitting + lexical support check，`answer_reflection.unsupported_claims` 会输出弱支撑断言
 - **状态**: ✅ 已修复（后续可升级为 LLM/NLI 级别 entailment）
+
+### Issue 21: Agent 缺少节点级结构化 trace
+
+- **文件**: `backend/src/agent/graph.py`
+- **问题**: 线上出问题时只能看散落日志，无法稳定知道每个节点的执行顺序、耗时、输出摘要和失败节点
+- **影响**: 难以定位问题发生在 query analysis、retrieval、re-search、generation 还是 reflection
+- **修复**: 为普通 RAG Agent 增加 `node_traces`，每个节点记录 `node`、`status`、`duration_ms` 和紧凑输出摘要；流式共享编排和 LangGraph 节点都接入 trace wrapper
+- **状态**: ✅ 已修复
+
+### Issue 22: Research 任务状态没有持久化当前步骤
+
+- **文件**: `backend/src/api/research.py`, `backend/src/db/models.py`, `backend/src/agent/research_graph.py`, `docs/schema.sql`
+- **问题**: `/api/research/{task_id}/status` 的 `current_step` 一直返回 `None/TODO`
+- **影响**: 用户和运维无法知道长任务卡在 planner、retriever、analyst、checker 还是 writer
+- **修复**: `ResearchTask` 增加 `current_step` 字段；Research Graph 支持 `on_step` async callback；后台任务在节点推进时写回 DB；任务创建状态改为 schema 允许的 `running`
+- **状态**: ✅ 已修复

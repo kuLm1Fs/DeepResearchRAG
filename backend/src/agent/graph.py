@@ -1,4 +1,5 @@
-from typing import AsyncIterator
+import time
+from typing import AsyncIterator, Awaitable, Callable
 
 from langgraph.graph import END, StateGraph
 
@@ -19,6 +20,8 @@ from .nodes import (
 )
 
 logger = get_logger(__name__)
+
+AgentNode = Callable[[AgentState], Awaitable[dict]]
 
 
 def build_initial_state(
@@ -54,6 +57,55 @@ def should_research(state: AgentState) -> str:
     return "proceed"
 
 
+def summarize_node_output(output: dict) -> dict:
+    """Keep trace payload compact and safe for logs/API responses."""
+    summary = {}
+    for key, value in output.items():
+        if isinstance(value, list):
+            summary[key] = {"type": "list", "count": len(value)}
+        elif isinstance(value, dict):
+            summary[key] = {"type": "dict", "keys": list(value.keys())[:10]}
+        else:
+            summary[key] = value
+    return summary
+
+
+async def run_traced_node(name: str, node: AgentNode, state: AgentState) -> dict:
+    """Run a node and append a structured trace event to state."""
+    started = time.perf_counter()
+    try:
+        output = await node(state)
+        status = "success"
+        error = None
+        return output | {
+            "node_traces": [
+                *state.get("node_traces", []),
+                {
+                    "node": name,
+                    "status": status,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                    "output": summarize_node_output(output),
+                },
+            ]
+        }
+    except Exception as exc:
+        trace_event = {
+            "node": name,
+            "status": "error",
+            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            "error": str(exc),
+        }
+        state["node_traces"] = [*state.get("node_traces", []), trace_event]
+        raise
+
+
+def traced_node(name: str, node: AgentNode) -> AgentNode:
+    async def wrapper(state: AgentState) -> dict:
+        return await run_traced_node(name, node, state)
+
+    return wrapper
+
+
 async def prepare_answer_state(state: AgentState) -> AgentState:
     """Run the shared pre-generation orchestration.
 
@@ -63,16 +115,20 @@ async def prepare_answer_state(state: AgentState) -> AgentState:
     """
     working_state: AgentState = dict(state)
 
-    for node in (analyze_query, plan_retrieval, retrieve):
-        working_state.update(await node(working_state))
+    for name, node in (
+        ("analyze_query", analyze_query),
+        ("plan_retrieval", plan_retrieval),
+        ("retrieve", retrieve),
+    ):
+        working_state.update(await run_traced_node(name, node, working_state))
 
     while True:
-        working_state.update(await evaluate_relevance(working_state))
+        working_state.update(await run_traced_node("evaluate_relevance", evaluate_relevance, working_state))
         if should_research(working_state) != "re_search":
             break
-        working_state.update(await re_search(working_state))
+        working_state.update(await run_traced_node("re_search", re_search, working_state))
 
-    working_state.update(await compare_sources(working_state))
+    working_state.update(await run_traced_node("compare_sources", compare_sources, working_state))
     return working_state
 
 
@@ -80,14 +136,14 @@ def create_agent_graph() -> StateGraph:
     graph = StateGraph(AgentState)
 
     # 添加节点
-    graph.add_node("analyze_query", analyze_query)
-    graph.add_node("compare_sources", compare_sources)
-    graph.add_node("plan_retrieval", plan_retrieval)
-    graph.add_node("retrieve", retrieve)
-    graph.add_node("evaluate_relevance", evaluate_relevance)
-    graph.add_node("re_search", re_search)
-    graph.add_node("generate_answer", generate_answer)
-    graph.add_node("self_reflect", self_reflect)
+    graph.add_node("analyze_query", traced_node("analyze_query", analyze_query))
+    graph.add_node("compare_sources", traced_node("compare_sources", compare_sources))
+    graph.add_node("plan_retrieval", traced_node("plan_retrieval", plan_retrieval))
+    graph.add_node("retrieve", traced_node("retrieve", retrieve))
+    graph.add_node("evaluate_relevance", traced_node("evaluate_relevance", evaluate_relevance))
+    graph.add_node("re_search", traced_node("re_search", re_search))
+    graph.add_node("generate_answer", traced_node("generate_answer", generate_answer))
+    graph.add_node("self_reflect", traced_node("self_reflect", self_reflect))
 
     # 设置入口
     graph.set_entry_point("analyze_query")

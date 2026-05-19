@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS research_tasks (
     title VARCHAR(1024) NOT NULL,
     query VARCHAR(4096),                  -- 原始查询
     status VARCHAR(32) DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+    current_step VARCHAR(32),             -- 当前执行节点: planner/retriever/analyst/checker/writer
     result_summary TEXT,                  -- 报告摘要
     result_markdown TEXT,                -- Markdown 报告全文
     result_slides JSONB,                 -- PPT 大纲 + 逐页内容 JSON

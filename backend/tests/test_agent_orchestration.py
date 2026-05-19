@@ -133,6 +133,42 @@ class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("存在未被来源支撑的断言", reflection["issues"])
         self.assertEqual(reflection["unsupported_claims"], ["Revenue doubled this quarter."])
 
+    async def test_prepare_answer_state_records_node_trace_events(self):
+        class FakeLLM:
+            async def chat(self, messages):
+                prompt = messages[0]["content"]
+                if "evaluate" in prompt:
+                    return '{"relevance": "HIGH", "coverage": 95, "gaps": [], "action": "proceed", "re_search_query": ""}'
+                return '{"intent": "factual", "rewritten_query": "trace query", "sub_queries": [], "keywords": ["trace"]}'
+
+        class FakeRetriever:
+            async def retrieve(self, query, top_k):
+                return [{"title": "Trace result", "content": "trace evidence", "source": "wire", "score": 0.9}]
+
+        class FakeRuntime:
+            def create_llm(self):
+                return FakeLLM()
+
+            def create_retriever(self):
+                return FakeRetriever()
+
+            def with_answer_cache(self, llm):
+                return llm
+
+        state = agent_graph.build_initial_state("trace", trace_id="trace-1", top_k=1)
+        state["runtime"] = FakeRuntime()
+
+        with patch.object(nodes, "load_prompt", side_effect=lambda name, **kwargs: name):
+            result = await agent_graph.prepare_answer_state(state)
+
+        trace_events = result["node_traces"]
+        self.assertEqual(
+            [event["node"] for event in trace_events],
+            ["analyze_query", "plan_retrieval", "retrieve", "evaluate_relevance", "compare_sources"],
+        )
+        self.assertTrue(all(event["status"] == "success" for event in trace_events))
+        self.assertTrue(all("duration_ms" in event for event in trace_events))
+
 
 class AgentStreamOrchestrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_uses_same_retrieval_evaluation_and_research_loop_before_answering(self):

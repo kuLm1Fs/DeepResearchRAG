@@ -25,7 +25,7 @@ class ResearchRequest(BaseModel):
 
 class ResearchResponse(BaseModel):
     task_id: str
-    status: str  # "processing" | "completed" | "failed"
+    status: str  # "pending" | "running" | "completed" | "failed"
     message: str
     current_step: str | None = None  # planner/retriever/analyst/checker/writer
     plan: dict | None = None
@@ -35,13 +35,32 @@ async def _run_research_task(task_id: str, query: str, user_id: str, company_id:
     """后台执行完整研究流程（planner → retriever → analyst → checker → writer）"""
     from ..agent.research_graph import run_research
 
+    async def on_step(step: str, state: dict):
+        async with get_db_session() as db:
+            await db.execute(
+                update(ResearchTask)
+                .where(ResearchTask.id == task_id)
+                .values(
+                    status="running",
+                    current_step=step,
+                    started_at=func.coalesce(ResearchTask.started_at, func.now()),
+                )
+            )
+            await db.commit()
+
     try:
         logger.info("research_task_started", task_id=task_id)
 
         # 调用完整研究流程
-        result = await run_research(query=query, user_id=user_id, company_id=company_id)
+        result = await run_research(
+            query=query,
+            user_id=user_id,
+            company_id=company_id,
+            on_step=on_step,
+            return_state=True,
+        )
 
-        final_output = result.get("final_output", {}) or {}
+        final_output = result.get("final_output", {}) or result
         evidence = result.get("evidence", [])
         report_md = final_output.get("report_md", "")
 
@@ -52,9 +71,13 @@ async def _run_research_task(task_id: str, query: str, user_id: str, company_id:
                 .where(ResearchTask.id == task_id)
                 .values(
                     status="completed",
+                    current_step="completed",
                     result_markdown=report_md,
                     result_summary=report_md[:500] if report_md else "",
+                    result_slides=final_output.get("slides"),
                     sources_used=len(evidence),
+                    gaps_identified=result.get("gaps") or None,
+                    conflicts_detected=result.get("conflicts") or None,
                     completed_at=func.now(),
                 )
             )
@@ -69,7 +92,7 @@ async def _run_research_task(task_id: str, query: str, user_id: str, company_id:
                 await db.execute(
                     update(ResearchTask)
                     .where(ResearchTask.id == task_id)
-                    .values(status="failed", error_message=str(e))
+                    .values(status="failed", current_step="failed", error_message=str(e))
                 )
                 await db.commit()
         except Exception:
@@ -85,7 +108,7 @@ async def create_research(
     创建研究任务（异步执行完整 pipeline）。
 
     流程：
-    1. 创建 ResearchTask（status=processing）
+    1. 创建 ResearchTask（status=running）
     2. 触发 run_research() 后台执行
     3. 立即返回 task_id（不等待 LLM 完成）
     4. GET /api/research/{task_id} 轮询状态和结果
@@ -96,7 +119,7 @@ async def create_research(
     logger.info("research_task_created", task_id=task_id, user_id=user.id, query=req.query)
 
     try:
-        # 写入 research_tasks 表（初始状态为 processing）
+        # 写入 research_tasks 表（初始状态为 running）
         async with get_db_session() as db:
             task = ResearchTask(
                 id=task_id,
@@ -104,7 +127,8 @@ async def create_research(
                 company_id=user.company_id,
                 title=f"研究: {req.query[:50]}",
                 query=req.query,
-                status="processing",
+                status="running",
+                current_step="queued",
             )
             db.add(task)
             await db.commit()
@@ -117,9 +141,9 @@ async def create_research(
         # 立即返回 task_id，不等待 LLM 完成
         return ResearchResponse(
             task_id=task_id,
-            status="processing",
+            status="running",
             message="研究任务已创建，正在异步处理中",
-            current_step="planner",
+            current_step="queued",
             plan={
                 "output_format": req.output_format,
                 "time_window": req.time_window,
@@ -149,7 +173,7 @@ async def get_research(task_id: str, current_user: Annotated[User, Depends(get_c
     return {
         "task_id": task.id,
         "status": task.status,
-        "current_step": None,  # 当前 step 存储在 state 中，需要定期更新才能追踪
+        "current_step": task.current_step,
         "query": task.query,
         "title": task.title,
         "result_markdown": task.result_markdown,
@@ -178,7 +202,7 @@ async def get_research_status(task_id: str, current_user: Annotated[User, Depend
     return {
         "task_id": task.id,
         "status": task.status,
-        "current_step": None,  # TODO: 可通过定期更新 ResearchTask.current_step 字段实现
+        "current_step": task.current_step,
         "sources_used": task.sources_used,
         "error_message": task.error_message,
     }
