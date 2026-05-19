@@ -64,6 +64,75 @@ class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["retrieval_evaluation"]["coverage"], 20)
         self.assertNotIn("answer_reflection", result)
 
+    async def test_nodes_use_runtime_injected_llm_and_retriever(self):
+        class FakeLLM:
+            async def chat(self, messages):
+                return '{"intent": "factual", "rewritten_query": "runtime query", "sub_queries": [], "keywords": ["runtime"]}'
+
+        class FakeRetriever:
+            async def retrieve(self, query, top_k):
+                return [{"title": f"{query} result", "content": "runtime evidence", "score": 0.9}]
+
+        class FakeRuntime:
+            def __init__(self):
+                self.llm_calls = 0
+                self.retriever_calls = 0
+
+            def create_llm(self):
+                self.llm_calls += 1
+                return FakeLLM()
+
+            def create_retriever(self):
+                self.retriever_calls += 1
+                return FakeRetriever()
+
+            def with_answer_cache(self, llm):
+                return llm
+
+        runtime = FakeRuntime()
+
+        with patch.object(nodes, "load_prompt", return_value="prompt"):
+            analysis = await nodes.analyze_query({"query": "runtime", "runtime": runtime})
+            retrieval = await nodes.retrieve({
+                "runtime": runtime,
+                "search_plan": {"queries": analysis["search_queries"], "per_query": 1, "total": 1},
+                "top_k": 1,
+            })
+
+        self.assertEqual(analysis["search_queries"], ["runtime query"])
+        self.assertEqual(retrieval["retrieval_results"][0]["content"], "runtime evidence")
+        self.assertEqual(runtime.llm_calls, 1)
+        self.assertEqual(runtime.retriever_calls, 1)
+
+    async def test_self_reflect_reports_unsupported_answer_claims(self):
+        state = {
+            "answer": "OpenAI released a new enterprise agent platform. Revenue doubled this quarter.",
+            "sources": [
+                {
+                    "title": "OpenAI enterprise platform",
+                    "content": "OpenAI released a new enterprise agent platform for business workflows.",
+                    "source": "wire",
+                    "category": "Business",
+                    "score": 0.9,
+                }
+            ],
+            "retrieval_results": [
+                {
+                    "title": "OpenAI enterprise platform",
+                    "content": "OpenAI released a new enterprise agent platform for business workflows.",
+                    "source": "wire",
+                    "category": "Business",
+                    "score": 0.9,
+                }
+            ],
+        }
+
+        result = await nodes.self_reflect(state)
+
+        reflection = result["answer_reflection"]
+        self.assertIn("存在未被来源支撑的断言", reflection["issues"])
+        self.assertEqual(reflection["unsupported_claims"], ["Revenue doubled this quarter."])
+
 
 class AgentStreamOrchestrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_uses_same_retrieval_evaluation_and_research_loop_before_answering(self):

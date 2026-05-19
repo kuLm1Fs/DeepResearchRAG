@@ -1,13 +1,30 @@
 import json
+import re
 from typing import Any, AsyncIterator
 
-from core import get_logger, settings
-from retrieval import MultiPathRetriever
-from vectorstore import MilvusStore
+from core import get_logger
 
+from .runtime import AgentRuntime
 from .templates import load_prompt
 
 logger = get_logger(__name__)
+
+
+def get_runtime(state: dict) -> AgentRuntime:
+    return state.get("runtime") or AgentRuntime()
+
+
+def get_llm(state: dict):
+    return get_runtime(state).create_llm()
+
+
+def get_retriever(state: dict):
+    return get_runtime(state).create_retriever()
+
+
+def get_answer_llm(state: dict):
+    runtime = get_runtime(state)
+    return runtime.with_answer_cache(runtime.create_llm())
 
 
 def parse_json_object(text: str) -> dict[str, Any]:
@@ -84,20 +101,62 @@ def format_sources(results: list[dict]) -> list[dict]:
     return sources
 
 
+def split_answer_claims(answer: str) -> list[str]:
+    """Split generated prose into simple claim-sized sentences."""
+    normalized = " ".join(line.strip("-* \t") for line in answer.splitlines())
+    claims = []
+    for match in re.finditer(r"[^。！？.!?]+[。！？.!?]?", normalized):
+        claim = match.group(0).strip()
+        if len(claim) >= 12:
+            claims.append(claim)
+    return claims
+
+
+def tokenize_for_support(text: str) -> set[str]:
+    tokens = re.findall(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]", text.lower())
+    stopwords = {
+        "the", "and", "for", "with", "that", "this", "from", "into", "about",
+        "have", "has", "was", "were", "are", "is", "new", "its", "their",
+    }
+    return {
+        token
+        for token in tokens
+        if token not in stopwords and (len(token) > 2 or "\u4e00" <= token <= "\u9fff")
+    }
+
+
+def find_unsupported_claims(answer: str, sources: list[dict]) -> list[str]:
+    """Flag answer sentences that have weak lexical support in retrieved sources."""
+    if not answer or not sources:
+        return []
+
+    source_text = " ".join(
+        f"{source.get('title', '')} {source.get('content', '')}"
+        for source in sources
+    )
+    source_tokens = tokenize_for_support(source_text)
+    unsupported = []
+
+    for claim in split_answer_claims(answer):
+        claim_tokens = tokenize_for_support(claim)
+        if not claim_tokens:
+            continue
+        overlap = claim_tokens & source_tokens
+        support_ratio = len(overlap) / len(claim_tokens)
+        if support_ratio < 0.45 and len(overlap) < 4:
+            unsupported.append(claim)
+
+    return unsupported
+
+
 async def analyze_query(state: dict) -> dict:
     """用 LLM 分析查询意图、关键词和子查询。"""
-    from llm import create_llm
-
     query = state.get("query", "")
     use_history = state.get("use_history", False)
     conversation_history = state.get("conversation_history", [])
     logger.info("analyzing_query", query=query)
 
-    llm = create_llm(
-        provider=settings.llm_provider,
-        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
-        model=settings.llm_model,
-    )
+    llm = get_llm(state)
 
     prompt = load_prompt("analyze_query", query=query)
 
@@ -182,8 +241,7 @@ async def retrieve(state: dict) -> dict:
 
     logger.info("retrieving", num_queries=len(queries), per_query=per_query, total=total)
 
-    store = MilvusStore()
-    retriever = MultiPathRetriever(store)
+    retriever = get_retriever(state)
 
     all_results = []
     seen_titles = set()
@@ -210,8 +268,6 @@ async def retrieve(state: dict) -> dict:
 
 async def evaluate_relevance(state: dict) -> dict:
     """用 LLM 评估检索结果质量。"""
-    from llm import create_llm
-
     results = state.get("retrieval_results", [])
     query = state.get("query", "")
 
@@ -228,11 +284,7 @@ async def evaluate_relevance(state: dict) -> dict:
             "reflection": evaluation,
         }
 
-    llm = create_llm(
-        provider=settings.llm_provider,
-        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
-        model=settings.llm_model,
-    )
+    llm = get_llm(state)
 
     context = format_context(results[:5])
     prompt = load_prompt("evaluate_relevance", query=query, context=context)
@@ -278,8 +330,7 @@ async def re_search(state: dict) -> dict:
     if not re_search_query:
         return {"re_search_count": state.get("re_search_count", 0) + 1}
 
-    store = MilvusStore()
-    retriever = MultiPathRetriever(store)
+    retriever = get_retriever(state)
 
     new_results = await retriever.retrieve(re_search_query, top_k=5)
 
@@ -302,27 +353,14 @@ async def re_search(state: dict) -> dict:
 
 
 async def generate_answer(state: dict) -> dict:
-    """Generate answer using LLM with retrieved context.
-
-    NOTE: Streaming support requires refactoring the agent workflow to return
-    an async generator instead of a dict. The current implementation collects
-    the full answer before returning. For true streaming, the SSE endpoint would
-    need to yield from stream_chat() directly.
-    """
-    from llm import create_llm
-
+    """Generate answer using LLM with retrieved context."""
     query = state.get("query", "")
     results = state.get("retrieval_results", [])
 
     if not results:
         return {"answer": "I couldn't find any relevant articles to answer your question.", "sources": []}
 
-    # Create LLM client
-    llm = create_llm(
-        provider=settings.llm_provider,
-        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
-        model=settings.llm_model,
-    )
+    llm = get_answer_llm(state)
 
     # Format context and sources
     context = format_context(results)
@@ -335,12 +373,7 @@ async def generate_answer(state: dict) -> dict:
     messages = [{"role": "user", "content": prompt}]
 
     try:
-        if settings.llm_cache:
-            from llm.cache import CachedLLM
-            cached_llm = CachedLLM(llm, cache_dir=settings.llm_cache_dir / settings.llm_provider)
-            answer = await cached_llm.chat(messages)
-        else:
-            answer = await llm.chat(messages)
+        answer = await llm.chat(messages)
     except Exception as e:
         logger.error("answer_generation_failed", error=str(e))
         return {"answer": f"Failed to generate answer: {e}", "sources": sources}
@@ -381,6 +414,10 @@ async def self_reflect(state: dict) -> dict:
     if not has_citation:
         issues.append("答案未引用检索来源")
 
+    unsupported_claims = find_unsupported_claims(answer, sources or results)
+    if unsupported_claims:
+        issues.append("存在未被来源支撑的断言")
+
     # 质量评分
     quality_map = {0: "POOR", 1: "FAIR", 2: "GOOD", 3: "EXCELLENT"}
     num_issues = len(issues)
@@ -391,6 +428,7 @@ async def self_reflect(state: dict) -> dict:
             "quality": quality,
             "issues": issues,
             "needs_revision": num_issues >= 2,
+            "unsupported_claims": unsupported_claims,
         }
     }
 
@@ -433,9 +471,6 @@ async def generate_answer_stream(state: dict) -> AsyncIterator[str]:
     与 generate_answer() 不同，此函数返回 AsyncIterator[str]，
     用于 SSE 实时流式输出。
     """
-    from llm import create_llm
-    from llm.cache import CachedLLM
-
     query = state.get("query", "")
     results = state.get("retrieval_results", [])
 
@@ -443,25 +478,15 @@ async def generate_answer_stream(state: dict) -> AsyncIterator[str]:
         yield "I couldn't find any relevant articles to answer your question."
         return
 
-    llm = create_llm(
-        provider=settings.llm_provider,
-        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
-        model=settings.llm_model,
-    )
+    llm = get_answer_llm(state)
 
     context = format_context(results)
     prompt = load_prompt("generate_answer", query=query, context=context)
     messages = [{"role": "user", "content": prompt}]
 
     try:
-        if settings.llm_cache:
-            cached_llm = CachedLLM(llm, cache_dir=settings.llm_cache_dir / settings.llm_provider)
-            # 缓存模式下仍然走 stream_chat，CachedLLM 的 chat 是缓存的，stream 是实时的
-            async for token in cached_llm.stream_chat(messages):
-                yield token
-        else:
-            async for token in llm.stream_chat(messages):
-                yield token
+        async for token in llm.stream_chat(messages):
+            yield token
     except Exception as e:
         logger.error("stream_answer_generation_failed", error=str(e))
         yield f"\n\n[Error: {e}]"

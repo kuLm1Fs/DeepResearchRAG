@@ -35,13 +35,17 @@ def planner(query: str, user_id: str | None = None) -> dict[str, Any]:
             "gaps": list[str]
         }
     """
-    # 检查 LLM 配置
+    return asyncio.run(aplanner(query=query, user_id=user_id))
+
+
+async def aplanner(query: str, user_id: str | None = None) -> dict[str, Any]:
+    """Async planner for use inside FastAPI/LangGraph async execution."""
     if not settings.deepseek_api_key and not settings.openai_api_key and not settings.qwen_api_key:
         logger.warning("planner: no LLM API key configured, returning stub")
         return _stub_planner(query)
 
     try:
-        return _call_llm_planner(query)
+        return await _async_llm_planner(query)
     except Exception as e:
         logger.error("planner LLM call failed", error=str(e))
         return _error_result(str(e))
@@ -262,6 +266,11 @@ def analyst(evidence: list[dict], focus: str = "all") -> dict[str, Any]:
             "gaps": list[str]
         }
     """
+    return asyncio.run(aanalyst(evidence=evidence, focus=focus))
+
+
+async def aanalyst(evidence: list[dict], focus: str = "all") -> dict[str, Any]:
+    """Async analyst for use inside FastAPI/LangGraph async execution."""
     task_id = str(uuid.uuid4())[:8]
 
     if not evidence:
@@ -282,7 +291,7 @@ def analyst(evidence: list[dict], focus: str = "all") -> dict[str, Any]:
         return _stub_analyst(focus)
 
     try:
-        return _call_analyst(evidence, focus)
+        return await _async_analyst(evidence, focus)
     except Exception as e:
         logger.error("analyst LLM call failed", error=str(e))
         return _error_analyst(str(e))
@@ -399,6 +408,11 @@ def checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
             "gaps": list[str]
         }
     """
+    return asyncio.run(achecker(claims=claims, evidence=evidence))
+
+
+async def achecker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
+    """Async checker for use inside FastAPI/LangGraph async execution."""
     task_id = str(uuid.uuid4())[:8]
 
     # 空 evidence → 返回 stub（不调用 LLM）
@@ -422,7 +436,7 @@ def checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
         return _stub_checker(claims, evidence)
 
     try:
-        return _call_checker(claims, evidence)
+        return await _async_checker(claims, evidence)
     except Exception as e:
         logger.error("checker LLM call failed", error=str(e))
         return _error_checker(str(e))
@@ -543,12 +557,20 @@ def writer(analysis: dict, check_result: dict | None, output_format: str = "both
             "gaps": list[str]
         }
     """
-    # 无 LLM key → 返回 stub
+    return asyncio.run(awriter(analysis=analysis, check_result=check_result, output_format=output_format))
+
+
+async def awriter(
+    analysis: dict,
+    check_result: dict | None,
+    output_format: str = "both",
+) -> dict[str, Any]:
+    """Async writer for use inside FastAPI/LangGraph async execution."""
     if not settings.deepseek_api_key and not settings.openai_api_key and not settings.qwen_api_key:
         return _stub_writer(analysis, check_result)
 
     try:
-        return _call_writer(analysis, check_result, output_format)
+        return await _async_writer(analysis, check_result, output_format)
     except Exception as e:
         logger.error("writer LLM call failed", error=str(e))
         return _error_writer(str(e))

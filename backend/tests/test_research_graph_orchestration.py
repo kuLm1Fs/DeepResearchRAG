@@ -8,33 +8,32 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent import research_graph
 
 
-class ResearchGraphOrchestrationTests(unittest.TestCase):
-    def test_top_level_agent_package_imports(self):
+class ResearchGraphOrchestrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_top_level_agent_package_imports(self):
         import agent
 
         self.assertTrue(hasattr(agent, "run_agent"))
         self.assertTrue(hasattr(agent, "run_research"))
 
-    def test_planner_node_promotes_sub_questions_to_state(self):
-        with patch.object(
-            research_graph,
-            "planner",
-            return_value={
+    async def test_planner_node_promotes_sub_questions_to_state(self):
+        async def fake_aplanner(query, user_id=None):
+            return {
                 "data": {
                     "goals": ["understand market"],
                     "sub_questions": ["market size", "adoption risks"],
                 }
-            },
-        ):
-            result = research_graph._planner_node({"query": "AI market", "user_id": "u1"})
+            }
+
+        with patch.object(research_graph, "aplanner", fake_aplanner):
+            result = await research_graph._planner_node({"query": "AI market", "user_id": "u1"})
 
         self.assertEqual(result["plan"]["goals"], ["understand market"])
         self.assertEqual(result["sub_questions"], ["market size", "adoption risks"])
 
-    def test_checker_node_calls_checker_once_and_exports_gaps(self):
+    async def test_checker_node_calls_checker_once_and_exports_gaps(self):
         calls = []
 
-        def fake_checker(claims, evidence):
+        async def fake_achecker(claims, evidence):
             calls.append((claims, evidence))
             return {"data": {"coverage": 0.6, "gaps": ["missing competitor evidence"]}}
 
@@ -43,14 +42,14 @@ class ResearchGraphOrchestrationTests(unittest.TestCase):
             "evidence": [{"title": "source"}],
         }
 
-        with patch.object(research_graph, "checker", fake_checker):
-            result = research_graph._checker_node(state)
+        with patch.object(research_graph, "achecker", fake_achecker):
+            result = await research_graph._checker_node(state)
 
         self.assertEqual(len(calls), 1)
         self.assertEqual(result["check_result"]["gaps"], ["missing competitor evidence"])
         self.assertEqual(result["gaps"], ["missing competitor evidence"])
 
-    def test_retriever_uses_checker_gaps_for_supplemental_search_and_merges_evidence(self):
+    async def test_retriever_uses_checker_gaps_for_supplemental_search_and_merges_evidence(self):
         seen_queries = []
 
         def fake_retriever(sub_questions, user_id=None):
@@ -80,7 +79,7 @@ class ResearchGraphOrchestrationTests(unittest.TestCase):
         self.assertEqual([item["title"] for item in result["evidence"]], ["Existing", "New"])
         self.assertEqual(result["tool_call_count"], 2)
 
-    def test_should_continue_stops_on_configuration_gaps(self):
+    async def test_should_continue_stops_on_configuration_gaps(self):
         state = {
             "check_result": {"coverage": 0.5, "gaps": ["需要配置 LLM API key 以获得真实核查"]},
             "tool_call_count": 1,

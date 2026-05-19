@@ -24,3 +24,4 @@ class AgentState(TypedDict, total=False):
     search_queries: list[str]            # Query rewrites/sub-queries used for retrieval
     source_comparison: dict[str, Any] | None  # Multi-source comparison summary
     re_search_count: int                 # Number of supplemental retrieval attempts
+    runtime: Any                         # Optional injected runtime dependencies

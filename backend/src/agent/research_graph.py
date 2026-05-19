@@ -6,7 +6,7 @@ from langgraph.graph import END, StateGraph
 from core import get_logger
 
 from .research_state import ResearchState
-from .research_tools import planner, retriever, analyst, checker, writer
+from .research_tools import aplanner, retriever, aanalyst, achecker, awriter
 
 logger = get_logger(__name__)
 
@@ -32,9 +32,9 @@ def create_research_graph():
     # 节点
     graph.add_node("planner", _planner_node)
     graph.add_node("retriever", lambda state: _call_retriever(state))
-    graph.add_node("analyst", lambda state: {"current_step": "analyst", "analysis": _call_analyst(state)})
+    graph.add_node("analyst", _analyst_node)
     graph.add_node("checker", _checker_node)
-    graph.add_node("writer", lambda state: {"current_step": "writer", "final_output": _call_writer(state)})
+    graph.add_node("writer", _writer_node)
 
     # 入口
     graph.set_entry_point("planner")
@@ -97,8 +97,8 @@ async def run_research(query: str, user_id: str | None = None, company_id: str |
 
 
 # ---- Tool 调用包装 ----
-def _planner_node(state: ResearchState) -> dict:
-    plan = _call_planner(state)
+async def _planner_node(state: ResearchState) -> dict:
+    plan = await _call_planner(state)
     sub_questions = plan.get("sub_questions") or plan.get("research_questions") or []
     return {
         "current_step": "planner",
@@ -107,8 +107,8 @@ def _planner_node(state: ResearchState) -> dict:
     }
 
 
-def _call_planner(state: ResearchState) -> dict:
-    result = planner(query=state["query"], user_id=state.get("user_id"))
+async def _call_planner(state: ResearchState) -> dict:
+    result = await aplanner(query=state["query"], user_id=state.get("user_id"))
     return result.get("data", {})
 
 
@@ -129,19 +129,23 @@ def _call_retriever(state: ResearchState) -> dict:
     }
 
 
-def _call_analyst(state: ResearchState) -> dict:
-    result = analyst(evidence=state.get("evidence", []))
+async def _analyst_node(state: ResearchState) -> dict:
+    return {"current_step": "analyst", "analysis": await _call_analyst(state)}
+
+
+async def _call_analyst(state: ResearchState) -> dict:
+    result = await aanalyst(evidence=state.get("evidence", []))
     return result.get("data", {})
 
 
-def _call_checker(state: ResearchState) -> dict:
+async def _call_checker(state: ResearchState) -> dict:
     claims = state.get("analysis", {}).get("claims", [])
-    result = checker(claims=claims, evidence=state.get("evidence", []))
+    result = await achecker(claims=claims, evidence=state.get("evidence", []))
     return result.get("data", {})
 
 
-def _checker_node(state: ResearchState) -> dict:
-    check_result = _call_checker(state)
+async def _checker_node(state: ResearchState) -> dict:
+    check_result = await _call_checker(state)
     return {
         "current_step": "checker",
         "check_result": check_result,
@@ -150,8 +154,12 @@ def _checker_node(state: ResearchState) -> dict:
     }
 
 
-def _call_writer(state: ResearchState) -> dict:
-    result = writer(
+async def _writer_node(state: ResearchState) -> dict:
+    return {"current_step": "writer", "final_output": await _call_writer(state)}
+
+
+async def _call_writer(state: ResearchState) -> dict:
+    result = await awriter(
         analysis=state.get("analysis", {}),
         check_result=state.get("check_result")
     )

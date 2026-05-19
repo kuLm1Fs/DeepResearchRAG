@@ -159,21 +159,21 @@
 - **文件**: `backend/src/agent/*`
 - **问题**: LLM、Retriever、MilvusStore、settings 仍在节点内部直接创建或调用
 - **影响**: 单测需要大量 patch，生产上难以做超时、熔断、灰度、provider fallback 和成本统计
-- **修复建议**: 抽 `AgentRuntime` / `AgentDependencies`，统一注入 LLM factory、retriever、trace recorder、timeout/retry policy
-- **状态**: ⏳ 待改进
+- **修复**: 已为普通 RAG Agent 新增 `AgentRuntime`，支持注入 LLM、Retriever 和答案缓存包装；Deep Research 仍需进一步接入统一 runtime
+- **状态**: ✅ 普通 RAG Agent 已修复；Deep Research runtime 注入待后续收敛
 
 ### Issue 19: Deep Research 工具仍使用同步包装调用异步 LLM
 
 - **文件**: `backend/src/agent/research_tools.py`
 - **问题**: `_call_*` 包装中使用 `asyncio.run()` 调用 async LLM
 - **影响**: 如果未来这些工具直接在 FastAPI async event loop 中调用，可能触发 nested event loop 错误
-- **修复建议**: 将 research tools 改成 async-first API，LangGraph 节点也使用 async node
-- **状态**: ⏳ 待改进
+- **修复**: 新增 async-first tool API（`aplanner` / `aanalyst` / `achecker` / `awriter`），Research Graph 节点改为 async node；同步包装仅保留给非 async 外部调用兼容
+- **状态**: ✅ 已修复
 
 ### Issue 20: 答案引用缺少 groundedness 校验
 
 - **文件**: `backend/src/agent/nodes.py`
 - **问题**: 当前 `self_reflect` 主要用长度、来源数量和标题关键词做启发式检查
 - **影响**: 不能可靠判断答案中的关键 claims 是否被 sources 支撑
-- **修复建议**: 增加 answer claim extraction + source entailment/coverage check，输出未支撑 claim 和引用缺口
-- **状态**: ⏳ 待改进
+- **修复**: 增加轻量 claim splitting + lexical support check，`answer_reflection.unsupported_claims` 会输出弱支撑断言
+- **状态**: ✅ 已修复（后续可升级为 LLM/NLI 级别 entailment）
