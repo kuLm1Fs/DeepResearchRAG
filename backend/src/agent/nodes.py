@@ -185,6 +185,67 @@ def bind_claim_citations(answer: str, sources: list[dict], max_sources: int = 2)
     return citations
 
 
+def assess_retrieval_quality(results: list[dict]) -> dict[str, Any]:
+    """Assess hard retrieval quality signals before generation."""
+    if not results:
+        return {
+            "enough_evidence": False,
+            "missing_dimensions": ["results"],
+            "source_diversity": "low",
+            "authority": "unknown",
+            "freshness": "unknown",
+            "requires_research": True,
+        }
+
+    sources = {item.get("source", "unknown") for item in results}
+    source_count = len(sources)
+    if source_count >= 3:
+        diversity = "high"
+    elif source_count == 2:
+        diversity = "medium"
+    else:
+        diversity = "low"
+
+    avg_score = sum(float(item.get("score", 0) or 0) for item in results) / len(results)
+    authority = "high" if avg_score >= 0.7 else "medium" if avg_score >= 0.45 else "low"
+
+    missing_dimensions = []
+    if len(results) < 2:
+        missing_dimensions.append("evidence_count")
+    if diversity == "low" and len(results) >= 2:
+        missing_dimensions.append("source_diversity")
+    if authority == "low":
+        missing_dimensions.append("authority")
+
+    return {
+        "enough_evidence": not missing_dimensions,
+        "missing_dimensions": missing_dimensions,
+        "source_diversity": diversity,
+        "authority": authority,
+        "freshness": "unknown",
+        "requires_research": bool(missing_dimensions),
+    }
+
+
+def apply_quality_gate(reflection: dict[str, Any], gate: dict[str, Any], query: str) -> dict[str, Any]:
+    if gate.get("enough_evidence"):
+        return reflection
+
+    gaps = list(dict.fromkeys([*reflection.get("gaps", []), *gate.get("missing_dimensions", [])]))
+    action = reflection.get("action", "proceed")
+    if action == "proceed":
+        action = "expand"
+
+    re_search_query = reflection.get("re_search_query") or f"{query} additional sources"
+
+    return {
+        **reflection,
+        "gaps": gaps,
+        "action": action,
+        "re_search_query": re_search_query,
+    }
+
+
 def find_unsupported_claims(answer: str, sources: list[dict]) -> list[str]:
     """Flag answer sentences that have weak lexical support in retrieved sources."""
     if not answer or not sources:
@@ -327,8 +388,10 @@ async def evaluate_relevance(state: dict) -> dict:
             "gaps": ["No results"],
             "re_search_query": "",
         }
+        quality_gate = assess_retrieval_quality(results)
         return {
             "retrieval_evaluation": evaluation,
+            "retrieval_quality_gate": quality_gate,
             "reflection": evaluation,
         }
 
@@ -354,6 +417,11 @@ async def evaluate_relevance(state: dict) -> dict:
             "re_search_query": "",
         }
 
+    quality_gate = assess_retrieval_quality(results)
+    reflection = parse_retrieval_evaluation(json.dumps(
+        apply_quality_gate(reflection, quality_gate, query)
+    ))
+
     logger.info(
         "relevance_evaluated",
         relevance=reflection.get("relevance"),
@@ -363,6 +431,7 @@ async def evaluate_relevance(state: dict) -> dict:
 
     return {
         "retrieval_evaluation": reflection,
+        "retrieval_quality_gate": quality_gate,
         # Backward-compatible alias for callers that still inspect reflection.
         "reflection": reflection,
     }

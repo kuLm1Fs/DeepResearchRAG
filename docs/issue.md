@@ -332,3 +332,26 @@
   - 无支撑 claim 会返回空 `source_indexes` 且 `support_level=unsupported`。
 - **面试怎么讲**: “我把 citation 从文档级提升到 claim 级。不是简单把 sources 附在答案后面，而是让每个具体判断都绑定到来源。这样既能提高用户信任，也能为后续自动评估和 NLI groundedness 打基础。”
 - **状态**: ✅ 已修复
+
+### Issue 28: 检索质量门禁过于依赖 LLM 主观评估
+
+- **文件**: `backend/src/agent/nodes.py`
+- **问题**: 之前 `evaluate_relevance` 主要依赖 LLM 判断 relevance、coverage 和 action，没有把来源多样性、证据数量、平均分等硬指标作为门禁。
+- **影响**: LLM 可能判断 “HIGH/proceed”，但实际只有单一来源或证据数量不足，导致答案基于薄弱材料生成。
+- **修复**: 增加 deterministic retrieval quality gate，输出 `retrieval_quality_gate`，并可覆盖 LLM 的 proceed 决策触发 expand/re-search。
+- **为什么做**: 检索质量不能完全交给 LLM 主观判断。新闻 RAG 尤其需要多来源交叉验证，单一来源即使相关度高，也可能不足以支撑可靠结论。
+- **怎么实现**:
+  - `assess_retrieval_quality()` 根据检索结果计算硬指标。
+  - 检查 evidence count、source diversity、平均 score 对应的 authority。
+  - 生成 `enough_evidence`、`missing_dimensions`、`source_diversity`、`authority`、`freshness`、`requires_research`。
+  - `apply_quality_gate()` 在 gate 不通过时追加 gaps，并将 `action=proceed` 提升为 `expand`。
+- **代码位置**:
+  - `backend/src/agent/nodes.py`：`assess_retrieval_quality()`、`apply_quality_gate()`、`evaluate_relevance()`。
+  - `backend/src/agent/state.py`：`retrieval_quality_gate` state 字段。
+  - `backend/tests/test_agent_orchestration.py`：低来源多样性触发 expand 的回归测试。
+- **运行时行为**:
+  - 如果 evidence 数量不足、来源单一或 authority 过低，`retrieval_quality_gate.enough_evidence=false`。
+  - 即使 LLM 返回 `action=proceed`，gate 也可以把 action 改成 `expand`，触发补检索。
+  - gate 的缺口会进入 `retrieval_evaluation.gaps`，便于 trace 和后续补检索使用。
+- **面试怎么讲**: “我没有完全相信 LLM 对检索质量的主观评价，而是加了一个 deterministic gate。LLM 负责语义判断，gate 负责硬约束，比如来源多样性和证据数量。两者结合比单靠 prompt 更可靠。”
+- **状态**: ✅ 已修复

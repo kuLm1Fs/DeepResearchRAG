@@ -180,7 +180,10 @@ class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
 
         class FakeRetriever:
             async def retrieve(self, query, top_k):
-                return [{"title": "Trace result", "content": "trace evidence", "source": "wire", "score": 0.9}]
+                return [
+                    {"title": "Trace result", "content": "trace evidence", "source": "wire", "score": 0.9},
+                    {"title": "Trace result 2", "content": "trace evidence", "source": "official", "score": 0.8},
+                ]
 
         class FakeRuntime:
             def create_llm(self):
@@ -192,7 +195,7 @@ class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
             def with_answer_cache(self, llm):
                 return llm
 
-        state = agent_graph.build_initial_state("trace", trace_id="trace-1", top_k=1)
+        state = agent_graph.build_initial_state("trace", trace_id="trace-1", top_k=2)
         state["runtime"] = FakeRuntime()
 
         with patch.object(nodes, "load_prompt", side_effect=lambda name, **kwargs: name):
@@ -206,7 +209,7 @@ class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(event["status"] == "success" for event in trace_events))
         self.assertTrue(all("duration_ms" in event for event in trace_events))
         retrieve_trace = next(event for event in trace_events if event["node"] == "retrieve")
-        self.assertEqual(retrieve_trace["metrics"]["retrieval_results_count"], 1)
+        self.assertEqual(retrieve_trace["metrics"]["retrieval_results_count"], 2)
         self.assertGreater(retrieve_trace["metrics"]["approx_output_tokens"], 0)
 
     async def test_traced_node_uses_policy_fallback_for_handled_errors(self):
@@ -238,7 +241,10 @@ class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
                 "create_retriever": lambda self: None,
                 "with_answer_cache": lambda self, llm: llm,
             })(),
-            "retrieval_results": [{"title": "AI policy", "content": "old", "source": "wire", "score": 0.7}],
+            "retrieval_results": [
+                {"title": "AI policy", "content": "old", "source": "wire", "score": 0.7},
+                {"title": "AI policy official", "content": "old", "source": "official", "score": 0.8},
+            ],
         }
 
         with patch.object(nodes, "load_prompt", return_value="evaluate"):
@@ -246,6 +252,34 @@ class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["retrieval_evaluation"]["relevance"], "HIGH")
         self.assertEqual(result["retrieval_evaluation"]["action"], "proceed")
+
+    async def test_retrieval_quality_gate_marks_low_diversity_as_expand(self):
+        class FakeLLM:
+            async def chat(self, messages):
+                return '{"relevance": "HIGH", "coverage": 90, "gaps": [], "action": "proceed", "re_search_query": ""}'
+
+        state = {
+            "query": "AI policy",
+            "runtime": type("Runtime", (), {
+                "create_llm": lambda self: FakeLLM(),
+                "create_retriever": lambda self: None,
+                "with_answer_cache": lambda self, llm: llm,
+            })(),
+            "retrieval_results": [
+                {"title": "A", "content": "policy", "source": "same", "score": 0.9},
+                {"title": "B", "content": "policy", "source": "same", "score": 0.8},
+                {"title": "C", "content": "policy", "source": "same", "score": 0.7},
+            ],
+        }
+
+        with patch.object(nodes, "load_prompt", return_value="evaluate"):
+            result = await nodes.evaluate_relevance(state)
+
+        gate = result["retrieval_quality_gate"]
+        self.assertFalse(gate["enough_evidence"])
+        self.assertEqual(gate["source_diversity"], "low")
+        self.assertEqual(result["retrieval_evaluation"]["action"], "expand")
+        self.assertIn("source_diversity", result["retrieval_evaluation"]["gaps"])
 
 
 class AgentStreamOrchestrationTests(unittest.IsolatedAsyncioTestCase):

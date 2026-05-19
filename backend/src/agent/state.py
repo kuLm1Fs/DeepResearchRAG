@@ -14,6 +14,7 @@ class AgentState(TypedDict, total=False):
     sources: list[dict]                  # Source citations
     citations: list[dict]                # Claim-to-source citation bindings
     retrieval_evaluation: dict[str, Any] # Retrieval relevance and re-search decision
+    retrieval_quality_gate: dict[str, Any] # Hard retrieval quality signals
     answer_reflection: dict[str, Any]    # Answer quality self-reflection result
     reflection: dict[str, Any]           # Backward-compatible retrieval evaluation alias
     iteration: int                      # Current iteration count
