@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from src.agent import graph as agent_graph
 from src.agent import nodes
+from src.agent.runtime import AgentRuntime, NodePolicy
 
 
 class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
@@ -168,6 +169,47 @@ class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(all(event["status"] == "success" for event in trace_events))
         self.assertTrue(all("duration_ms" in event for event in trace_events))
+        retrieve_trace = next(event for event in trace_events if event["node"] == "retrieve")
+        self.assertEqual(retrieve_trace["metrics"]["retrieval_results_count"], 1)
+        self.assertGreater(retrieve_trace["metrics"]["approx_output_tokens"], 0)
+
+    async def test_traced_node_uses_policy_fallback_for_handled_errors(self):
+        async def broken_node(state):
+            raise RuntimeError("optional comparison failed")
+
+        runtime = AgentRuntime()
+        runtime.node_policies["compare_sources"] = NodePolicy(
+            error_level="handled",
+            fallback_result={"source_comparison": None},
+        )
+        state = {"runtime": runtime, "node_traces": []}
+
+        result = await agent_graph.run_traced_node("compare_sources", broken_node, state)
+
+        self.assertEqual(result["source_comparison"], None)
+        self.assertEqual(result["node_traces"][0]["status"], "fallback")
+        self.assertEqual(result["node_traces"][0]["error_level"], "handled")
+
+    async def test_evaluate_relevance_rejects_invalid_structured_llm_output(self):
+        class FakeLLM:
+            async def chat(self, messages):
+                return '{"relevance": "PERFECT", "coverage": 999, "gaps": [], "action": "delete", "re_search_query": ""}'
+
+        state = {
+            "query": "AI policy reaction",
+            "runtime": type("Runtime", (), {
+                "create_llm": lambda self: FakeLLM(),
+                "create_retriever": lambda self: None,
+                "with_answer_cache": lambda self, llm: llm,
+            })(),
+            "retrieval_results": [{"title": "AI policy", "content": "old", "source": "wire", "score": 0.7}],
+        }
+
+        with patch.object(nodes, "load_prompt", return_value="evaluate"):
+            result = await nodes.evaluate_relevance(state)
+
+        self.assertEqual(result["retrieval_evaluation"]["relevance"], "HIGH")
+        self.assertEqual(result["retrieval_evaluation"]["action"], "proceed")
 
 
 class AgentStreamOrchestrationTests(unittest.IsolatedAsyncioTestCase):

@@ -496,9 +496,10 @@ Agent 系统的问题如果只靠口头记忆，很容易后续重复踩坑。
 ## 后续可以继续收敛的方向
 
 - Deep Research 全面接入 `AgentRuntime`
-- 每个 LangGraph node 增加 timeout / retry / fallback policy
-- 每个节点输出 structured trace：耗时、输入摘要、输出摘要、错误等级、fallback 标记、token/cost（已完成基础 `node_traces`，后续可补 token/cost）
+- 每个 LangGraph node 增加 timeout / retry / fallback policy（已完成 `NodePolicy` 的 timeout、error level、fallback 基础能力）
+- 每个节点输出 structured trace：耗时、输入摘要、输出摘要、错误等级、fallback 标记、token/cost（已完成基础 `node_traces` 和近似输出 token/结果规模指标，后续可补真实 provider token/cost）
 - Research task 的 `current_step` 写回数据库，支持 `/research/{task_id}/status` 实时展示（已完成基础状态回写）
+- DB migration：已有数据库不会因为 ORM/schema 文件变化自动加列，必须用幂等 migration SQL 显式变更（已补 `001_add_research_current_step.sql`）
 - groundedness 从词面匹配升级到 LLM/NLI entailment
 - source comparison 从来源数量升级为事实冲突检测
-- 将 state schema 升级为更严格的 Pydantic model 或 TypedDict + validator
+- 将 state schema 升级为更严格的 Pydantic model 或 TypedDict + validator（已完成 LLM 输出的 `QueryAnalysis` / `RetrievalEvaluation` schema 校验，后续可覆盖完整 AgentState）

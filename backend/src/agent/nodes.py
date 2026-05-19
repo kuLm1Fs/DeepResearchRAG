@@ -5,6 +5,7 @@ from typing import Any, AsyncIterator
 from core import get_logger
 
 from .runtime import AgentRuntime
+from .schemas import QueryAnalysis, RetrievalEvaluation
 from .templates import load_prompt
 
 logger = get_logger(__name__)
@@ -55,6 +56,16 @@ def parse_json_object(text: str) -> dict[str, Any]:
             return value
 
     raise ValueError("No JSON object found in LLM response")
+
+
+def parse_query_analysis(text: str, fallback_query: str) -> dict[str, Any]:
+    data = parse_json_object(text)
+    data.setdefault("rewritten_query", fallback_query)
+    return QueryAnalysis.model_validate(data).model_dump()
+
+
+def parse_retrieval_evaluation(text: str) -> dict[str, Any]:
+    return RetrievalEvaluation.model_validate(parse_json_object(text)).model_dump()
 
 
 def format_context(results: list[dict], max_length: int = 2000) -> str:
@@ -174,7 +185,7 @@ async def analyze_query(state: dict) -> dict:
 
     try:
         response = await llm.chat(messages)
-        parsed = parse_json_object(response)
+        parsed = parse_query_analysis(response, query)
     except Exception as e:
         logger.warning("analyze_query_llm_failed", error=str(e))
         # fallback
@@ -292,7 +303,7 @@ async def evaluate_relevance(state: dict) -> dict:
 
     try:
         response = await llm.chat(messages)
-        reflection = parse_json_object(response)
+        reflection = parse_retrieval_evaluation(response)
     except Exception as e:
         logger.warning("evaluate_relevance_llm_failed", error=str(e))
         # fallback

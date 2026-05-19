@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import AsyncIterator, Awaitable, Callable
 
@@ -18,6 +19,8 @@ from .nodes import (
     format_sources,
     compare_sources,
 )
+from .runtime import AgentRuntime
+from .runtime import NodePolicy
 
 logger = get_logger(__name__)
 
@@ -70,30 +73,71 @@ def summarize_node_output(output: dict) -> dict:
     return summary
 
 
+def get_runtime(state: AgentState) -> AgentRuntime:
+    return state.get("runtime") or AgentRuntime()
+
+
+def runtime_policy(runtime, name: str) -> NodePolicy:
+    if hasattr(runtime, "policy_for"):
+        return runtime.policy_for(name)
+    return NodePolicy()
+
+
+def runtime_trace_metrics(runtime, name: str, output: dict) -> dict:
+    if hasattr(runtime, "trace_metrics"):
+        return runtime.trace_metrics(name, output)
+    return AgentRuntime().trace_metrics(name, output)
+
+
 async def run_traced_node(name: str, node: AgentNode, state: AgentState) -> dict:
     """Run a node and append a structured trace event to state."""
     started = time.perf_counter()
+    runtime = get_runtime(state)
+    policy = runtime_policy(runtime, name)
     try:
-        output = await node(state)
+        if policy.timeout_seconds is not None:
+            output = await asyncio.wait_for(node(state), timeout=policy.timeout_seconds)
+        else:
+            output = await node(state)
         status = "success"
-        error = None
         return output | {
             "node_traces": [
                 *state.get("node_traces", []),
                 {
                     "node": name,
                     "status": status,
+                    "error_level": None,
                     "duration_ms": round((time.perf_counter() - started) * 1000, 2),
                     "output": summarize_node_output(output),
+                    "metrics": runtime_trace_metrics(runtime, name, output),
                 },
             ]
         }
     except Exception as exc:
+        if policy.fallback_result is not None and policy.error_level != "critical":
+            output = policy.fallback_result
+            return output | {
+                "node_traces": [
+                    *state.get("node_traces", []),
+                    {
+                        "node": name,
+                        "status": "fallback",
+                        "error_level": policy.error_level,
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                        "error": str(exc),
+                        "output": summarize_node_output(output),
+                        "metrics": runtime_trace_metrics(runtime, name, output),
+                    },
+                ]
+            }
+
         trace_event = {
             "node": name,
             "status": "error",
+            "error_level": policy.error_level,
             "duration_ms": round((time.perf_counter() - started) * 1000, 2),
             "error": str(exc),
+            "metrics": {},
         }
         state["node_traces"] = [*state.get("node_traces", []), trace_event]
         raise
