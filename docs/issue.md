@@ -85,3 +85,95 @@
 
 - **状态**: ✅ 已修复（在 c71b688 之后）
 - **修复**: CC 添加 `decode_access_token` 函数
+
+---
+
+## Agent 编排审计记录（2026-05-19）
+
+### Issue 10: 流式与非流式 Agent 编排路径不一致
+
+- **文件**: `backend/src/agent/graph.py`
+- **问题**: 非流式路径走 LangGraph，流式路径手工串联节点，且流式缺少检索质量评估、补检索、多源对比等步骤
+- **影响**: 同一个查询在 `stream=true/false` 下可能得到不同检索材料和不同质量控制结果
+- **修复**: 新增共享的 pre-generation 编排流程，流式输出在生成 token 前执行同样的分析、规划、检索、评估、补检索和多源对比
+- **状态**: ✅ 已修复
+
+### Issue 11: `compare_sources` 节点执行顺序错误
+
+- **文件**: `backend/src/agent/graph.py`
+- **问题**: 多源对比节点原先在检索前执行，状态中还没有 `retrieval_results`
+- **影响**: 多源对比功能表面存在，实际无法工作
+- **修复**: 将 `compare_sources` 移到检索质量评估和补检索之后、答案生成之前
+- **状态**: ✅ 已修复
+
+### Issue 12: `reflection` 字段混用导致状态语义不清
+
+- **文件**: `backend/src/agent/state.py`, `backend/src/agent/nodes.py`
+- **问题**: 检索质量评估和答案自检都写入 `reflection`
+- **影响**: 路由决策、答案质量评估和调试观测互相覆盖
+- **修复**: 拆分为 `retrieval_evaluation` 和 `answer_reflection`，保留 `reflection` 作为兼容别名
+- **状态**: ✅ 已修复
+
+### Issue 13: LLM JSON 输出解析过于脆弱
+
+- **文件**: `backend/src/agent/nodes.py`, `backend/src/agent/research_tools.py`
+- **问题**: 直接 `json.loads(response.strip())`，遇到 markdown code block 或前置说明会失败
+- **影响**: Agent 控制流容易误入 fallback，降低检索规划和质量评估稳定性
+- **修复**: 新增统一 JSON object 提取函数，并复用于普通 RAG Agent 和 Deep Research tools
+- **状态**: ✅ 已修复
+
+### Issue 14: 顶层 `import agent` 会被 Deep Research 相对导入破坏
+
+- **文件**: `backend/src/agent/research_graph.py`, `backend/src/agent/research_tools.py`
+- **问题**: `agent.__init__` 导入 research 模块时，`from ..core` 等相对导入会在顶层包导入场景下报错
+- **影响**: `/api/query` 中 `from agent import run_agent` 存在启动期失败风险
+- **修复**: research 模块改为与现有普通 RAG Agent 一致的绝对导入风格
+- **状态**: ✅ 已修复
+
+### Issue 15: Deep Research Planner 子问题没有传给 Retriever
+
+- **文件**: `backend/src/agent/research_graph.py`
+- **问题**: Planner 返回 `sub_questions`，但 graph state 没有更新该字段
+- **影响**: Retriever 实际只检索原始 query，研究计划形同虚设
+- **修复**: 新增 planner node，将 `sub_questions` / `research_questions` 提升到 state
+- **状态**: ✅ 已修复
+
+### Issue 16: Deep Research Checker 被重复调用
+
+- **文件**: `backend/src/agent/research_graph.py`
+- **问题**: checker 节点 lambda 中 `_call_checker(state)` 执行两次
+- **影响**: 额外消耗 LLM token，且两次结果可能不一致
+- **修复**: 新增 checker node，单次调用后同时写入 `check_result`、`gaps` 和 `conflicts`
+- **状态**: ✅ 已修复
+
+### Issue 17: Deep Research 补检索可能重复拉同一批材料
+
+- **文件**: `backend/src/agent/research_graph.py`
+- **问题**: Checker 发现 gaps 后重新进入 Retriever，但 Retriever 仍可能使用原始子问题，且新证据覆盖旧证据
+- **影响**: 可能浪费工具调用，并丢失第一轮证据
+- **修复**: 补检索时优先使用 `gaps` 作为查询，并合并/去重新旧 evidence
+- **状态**: ✅ 已修复
+
+### Issue 18: Deep Research 缺少真正的生产级运行时抽象
+
+- **文件**: `backend/src/agent/*`
+- **问题**: LLM、Retriever、MilvusStore、settings 仍在节点内部直接创建或调用
+- **影响**: 单测需要大量 patch，生产上难以做超时、熔断、灰度、provider fallback 和成本统计
+- **修复建议**: 抽 `AgentRuntime` / `AgentDependencies`，统一注入 LLM factory、retriever、trace recorder、timeout/retry policy
+- **状态**: ⏳ 待改进
+
+### Issue 19: Deep Research 工具仍使用同步包装调用异步 LLM
+
+- **文件**: `backend/src/agent/research_tools.py`
+- **问题**: `_call_*` 包装中使用 `asyncio.run()` 调用 async LLM
+- **影响**: 如果未来这些工具直接在 FastAPI async event loop 中调用，可能触发 nested event loop 错误
+- **修复建议**: 将 research tools 改成 async-first API，LangGraph 节点也使用 async node
+- **状态**: ⏳ 待改进
+
+### Issue 20: 答案引用缺少 groundedness 校验
+
+- **文件**: `backend/src/agent/nodes.py`
+- **问题**: 当前 `self_reflect` 主要用长度、来源数量和标题关键词做启发式检查
+- **影响**: 不能可靠判断答案中的关键 claims 是否被 sources 支撑
+- **修复建议**: 增加 answer claim extraction + source entailment/coverage check，输出未支撑 claim 和引用缺口
+- **状态**: ⏳ 待改进

@@ -10,6 +10,36 @@ from .templates import load_prompt
 logger = get_logger(__name__)
 
 
+def parse_json_object(text: str) -> dict[str, Any]:
+    """Parse the first JSON object from an LLM response.
+
+    Providers occasionally wrap "JSON only" responses in markdown fences or a
+    short preface. Scanning for a decodable object keeps agent control-flow from
+    falling back unnecessarily on harmless formatting drift.
+    """
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(stripped):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(stripped[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+
+    raise ValueError("No JSON object found in LLM response")
+
+
 def format_context(results: list[dict], max_length: int = 2000) -> str:
     """Format retrieval results as context for LLM."""
     if not results:
@@ -85,7 +115,7 @@ async def analyze_query(state: dict) -> dict:
 
     try:
         response = await llm.chat(messages)
-        parsed = json.loads(response.strip())
+        parsed = parse_json_object(response)
     except Exception as e:
         logger.warning("analyze_query_llm_failed", error=str(e))
         # fallback
@@ -186,13 +216,16 @@ async def evaluate_relevance(state: dict) -> dict:
     query = state.get("query", "")
 
     if not results:
+        evaluation = {
+            "relevance": "LOW",
+            "coverage": 0,
+            "action": "proceed",
+            "gaps": ["No results"],
+            "re_search_query": "",
+        }
         return {
-            "reflection": {
-                "relevance": "LOW",
-                "coverage": 0,
-                "action": "proceed",
-                "gaps": ["No results"],
-            },
+            "retrieval_evaluation": evaluation,
+            "reflection": evaluation,
         }
 
     llm = create_llm(
@@ -207,7 +240,7 @@ async def evaluate_relevance(state: dict) -> dict:
 
     try:
         response = await llm.chat(messages)
-        reflection = json.loads(response.strip())
+        reflection = parse_json_object(response)
     except Exception as e:
         logger.warning("evaluate_relevance_llm_failed", error=str(e))
         # fallback
@@ -228,12 +261,16 @@ async def evaluate_relevance(state: dict) -> dict:
         action=reflection.get("action"),
     )
 
-    return {"reflection": reflection}
+    return {
+        "retrieval_evaluation": reflection,
+        # Backward-compatible alias for callers that still inspect reflection.
+        "reflection": reflection,
+    }
 
 
 async def re_search(state: dict) -> dict:
     """用补充 query 进行额外检索，合并结果。"""
-    reflection = state.get("reflection", {})
+    reflection = state.get("retrieval_evaluation") or state.get("reflection", {})
     re_search_query = reflection.get("re_search_query", "")
 
     logger.info("re_searching", query=re_search_query)
@@ -350,7 +387,7 @@ async def self_reflect(state: dict) -> dict:
     quality = quality_map.get(min(num_issues, 3), "POOR")
 
     return {
-        "reflection": {
+        "answer_reflection": {
             "quality": quality,
             "issues": issues,
             "needs_revision": num_issues >= 2,

@@ -1,11 +1,12 @@
 """5个 Tool Function 实现（Stub）"""
 import asyncio
-import json
 import uuid
 from datetime import datetime
 from typing import Any
 
-from ..core import settings, get_logger
+from core import settings, get_logger
+
+from .nodes import parse_json_object
 
 logger = get_logger(__name__)
 
@@ -53,7 +54,7 @@ def _call_llm_planner(query: str) -> dict[str, Any]:
 
 async def _async_llm_planner(query: str) -> dict[str, Any]:
     """调用 LLM 生成研究计划（async）"""
-    from ..llm import create_llm
+    from llm import create_llm
 
     llm = create_llm(
         provider=settings.llm_provider,
@@ -91,15 +92,7 @@ async def _async_llm_planner(query: str) -> dict[str, Any]:
 
     # 解析 JSON
     try:
-        # 尝试提取 JSON 代码块
-        if "```json" in response:
-            json_str = response.split("```json")[1].split("```")[0].strip()
-        elif "```" in response:
-            json_str = response.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = response.strip()
-
-        data = json.loads(json_str)
+        data = parse_json_object(response)
         return {
             "task_id": str(uuid.uuid4())[:8],
             "status": "success",
@@ -107,7 +100,7 @@ async def _async_llm_planner(query: str) -> dict[str, Any]:
             "errors": [],
             "gaps": []
         }
-    except json.JSONDecodeError as e:
+    except ValueError as e:
         logger.warning("planner JSON parse failed", error=str(e), response=response[:200])
         # Fallback: 返回一个基础计划
         return _stub_planner(query)
@@ -178,8 +171,8 @@ def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = No
         }
 
     try:
-        from ..vectorstore.embedding import get_embedding_sync
-        from ..vectorstore.milvus_store import MilvusStore
+        from vectorstore.embedding import get_embedding_sync
+        from vectorstore.milvus_store import MilvusStore
 
         store = MilvusStore()
 
@@ -301,7 +294,7 @@ def _call_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
 
 async def _async_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
     """调用 LLM 分析证据（async）"""
-    from ..llm import create_llm
+    from llm import create_llm
 
     llm = create_llm(
         provider=settings.llm_provider,
@@ -345,13 +338,7 @@ async def _async_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
     response = await llm.chat(messages)
 
     try:
-        if "```json" in response:
-            json_str = response.split("```json")[1].split("```")[0].strip()
-        elif "```" in response:
-            json_str = response.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = response.strip()
-        data = json.loads(json_str)
+        data = parse_json_object(response)
         return {
             "task_id": str(uuid.uuid4())[:8],
             "status": "success",
@@ -359,8 +346,8 @@ async def _async_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
             "errors": [],
             "gaps": []
         }
-    except json.JSONDecodeError:
-        logger.warning("analyst JSON parse failed, using stub")
+    except ValueError as e:
+        logger.warning("analyst JSON parse failed, using stub", error=str(e))
         return _stub_analyst(focus)
 
 
@@ -448,7 +435,7 @@ def _call_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
 
 async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
     """调用 LLM 进行事实核查（async）"""
-    from ..llm import create_llm
+    from llm import create_llm
 
     llm = create_llm(
         provider=settings.llm_provider,
@@ -494,13 +481,7 @@ async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, 
     response = await llm.chat(messages)
 
     try:
-        if "```json" in response:
-            json_str = response.split("```json")[1].split("```")[0].strip()
-        elif "```" in response:
-            json_str = response.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = response.strip()
-        data = json.loads(json_str)
+        data = parse_json_object(response)
         return {
             "task_id": str(uuid.uuid4())[:8],
             "status": "success",
@@ -508,8 +489,8 @@ async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, 
             "errors": [],
             "gaps": []
         }
-    except json.JSONDecodeError:
-        logger.warning("checker JSON parse failed, using stub")
+    except ValueError as e:
+        logger.warning("checker JSON parse failed, using stub", error=str(e))
         return _stub_checker(claims, evidence)
 
 
@@ -671,14 +652,7 @@ async def _build_ppt_content(
     response = await llm.chat(messages)
 
     try:
-        if "```json" in response:
-            json_str = response.split("```json")[1].split("```")[0].strip()
-        elif "```" in response:
-            json_str = response.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = response.strip()
-
-        ppt_data = json.loads(json_str)
+        ppt_data = parse_json_object(response)
 
         ppt_outline = {
             "title": ppt_data.get("title", "研究报告"),
@@ -692,7 +666,7 @@ async def _build_ppt_content(
 
         return ppt_outline, slides
 
-    except (json.JSONDecodeError, Exception) as e:
+    except Exception as e:
         logger.warning("PPT generation failed, using fallback", error=str(e))
         # Fallback: 生成默认 PPT 结构
         return _generate_fallback_ppt(audience)
@@ -726,7 +700,7 @@ def _generate_fallback_ppt(audience: str) -> tuple[dict, list[dict]]:
 
 async def _async_writer(analysis: dict, check_result: dict | None, output_format: str) -> dict[str, Any]:
     """调用 LLM 生成 Markdown 报告（async）"""
-    from ..llm import create_llm
+    from llm import create_llm
 
     llm = create_llm(
         provider=settings.llm_provider,

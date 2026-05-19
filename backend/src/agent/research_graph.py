@@ -3,9 +3,10 @@ from typing import Literal
 
 from langgraph.graph import END, StateGraph
 
+from core import get_logger
+
 from .research_state import ResearchState
 from .research_tools import planner, retriever, analyst, checker, writer
-from ..core import get_logger
 
 logger = get_logger(__name__)
 
@@ -13,8 +14,13 @@ logger = get_logger(__name__)
 def should_continue(state: ResearchState) -> Literal["retriever", "writer"]:
     """检查是否需要补充检索。"""
     check_result = state.get("check_result")
-    if check_result and check_result.get("gaps"):
-        if len(check_result["gaps"]) > 0 and state.get("tool_call_count", 0) < state.get("max_tool_calls", 20):
+    gaps = check_result.get("gaps", []) if check_result else []
+    actionable_gaps = [
+        gap for gap in gaps
+        if "配置" not in gap and "API key" not in gap and "证据为空" not in gap
+    ]
+    if actionable_gaps:
+        if state.get("tool_call_count", 0) < state.get("max_tool_calls", 20):
             return "retriever"
     return "writer"
 
@@ -24,10 +30,10 @@ def create_research_graph():
     graph = StateGraph(ResearchState)
 
     # 节点
-    graph.add_node("planner", lambda state: {"current_step": "planner", "plan": _call_planner(state)})
+    graph.add_node("planner", _planner_node)
     graph.add_node("retriever", lambda state: _call_retriever(state))
     graph.add_node("analyst", lambda state: {"current_step": "analyst", "analysis": _call_analyst(state)})
-    graph.add_node("checker", lambda state: {"current_step": "checker", "check_result": _call_checker(state), "gaps": _call_checker(state).get("gaps", [])})
+    graph.add_node("checker", _checker_node)
     graph.add_node("writer", lambda state: {"current_step": "writer", "final_output": _call_writer(state)})
 
     # 入口
@@ -91,16 +97,34 @@ async def run_research(query: str, user_id: str | None = None, company_id: str |
 
 
 # ---- Tool 调用包装 ----
+def _planner_node(state: ResearchState) -> dict:
+    plan = _call_planner(state)
+    sub_questions = plan.get("sub_questions") or plan.get("research_questions") or []
+    return {
+        "current_step": "planner",
+        "plan": plan,
+        "sub_questions": sub_questions,
+    }
+
+
 def _call_planner(state: ResearchState) -> dict:
     result = planner(query=state["query"], user_id=state.get("user_id"))
     return result.get("data", {})
 
 
 def _call_retriever(state: ResearchState) -> dict:
-    sub_questions = state.get("sub_questions", []) or [state["query"]]
+    if state.get("gaps") and state.get("tool_call_count", 0) > 0:
+        sub_questions = state.get("gaps", [])
+    else:
+        sub_questions = state.get("sub_questions", []) or [state["query"]]
+
     result = retriever(sub_questions=sub_questions, user_id=state.get("user_id"))
+    existing = state.get("evidence", [])
+    new_evidence = result.get("data", {}).get("evidence", [])
+    merged = _merge_evidence(existing, new_evidence)
     return {
-        "evidence": result.get("data", {}).get("evidence", []),
+        "current_step": "retriever",
+        "evidence": merged,
         "tool_call_count": state.get("tool_call_count", 0) + 1
     }
 
@@ -116,9 +140,33 @@ def _call_checker(state: ResearchState) -> dict:
     return result.get("data", {})
 
 
+def _checker_node(state: ResearchState) -> dict:
+    check_result = _call_checker(state)
+    return {
+        "current_step": "checker",
+        "check_result": check_result,
+        "gaps": check_result.get("gaps", []),
+        "conflicts": check_result.get("conflicts", []),
+    }
+
+
 def _call_writer(state: ResearchState) -> dict:
     result = writer(
         analysis=state.get("analysis", {}),
         check_result=state.get("check_result")
     )
     return result.get("data", {})
+
+
+def _merge_evidence(existing: list[dict], new_evidence: list[dict]) -> list[dict]:
+    merged = []
+    seen = set()
+
+    for item in [*existing, *new_evidence]:
+        key = item.get("url") or item.get("title") or item.get("content", "")[:200]
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+
+    return merged
