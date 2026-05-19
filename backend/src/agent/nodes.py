@@ -246,6 +246,39 @@ def apply_quality_gate(reflection: dict[str, Any], gate: dict[str, Any], query: 
     }
 
 
+def extract_numeric_values(text: str) -> set[str]:
+    return set(re.findall(r"\b\d+(?:\.\d+)?\b", text))
+
+
+def detect_source_conflicts(results: list[dict]) -> list[dict]:
+    """Detect obvious cross-source factual conflicts."""
+    conflicts = []
+    numeric_by_source = []
+    for result in results:
+        values = extract_numeric_values(f"{result.get('title', '')} {result.get('content', '')}")
+        if values:
+            numeric_by_source.append({
+                "source": result.get("source", "unknown"),
+                "title": result.get("title", ""),
+                "values": values,
+            })
+
+    for i, left in enumerate(numeric_by_source):
+        for right in numeric_by_source[i + 1:]:
+            if left["source"] == right["source"]:
+                continue
+            if left["values"] != right["values"]:
+                conflicts.append({
+                    "type": "numeric_conflict",
+                    "sources": [left["source"], right["source"]],
+                    "titles": [left["title"], right["title"]],
+                    "values": sorted(left["values"] | right["values"], key=float),
+                })
+                return conflicts
+
+    return conflicts
+
+
 def find_unsupported_claims(answer: str, sources: list[dict]) -> list[str]:
     """Flag answer sentences that have weak lexical support in retrieved sources."""
     if not answer or not sources:
@@ -580,7 +613,7 @@ async def compare_sources(state: dict) -> dict:
         "num_sources": len(sources),
         "sources": list(sources.keys()),
         "consensus": "",  # 共识内容
-        "conflicts": [],  # 矛盾内容
+        "conflicts": detect_source_conflicts(results),  # 矛盾内容
     }
 
     # 简单逻辑：检查不同来源对同一事件的描述是否一致

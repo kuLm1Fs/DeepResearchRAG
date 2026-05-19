@@ -281,6 +281,29 @@ class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["retrieval_evaluation"]["action"], "expand")
         self.assertIn("source_diversity", result["retrieval_evaluation"]["gaps"])
 
+    async def test_compare_sources_detects_numeric_conflicts(self):
+        state = {
+            "retrieval_results": [
+                {
+                    "title": "Company A funding",
+                    "content": "Company A raised 10 million dollars in its latest financing round.",
+                    "source": "wire",
+                },
+                {
+                    "title": "Company A funding update",
+                    "content": "Company A raised 20 million dollars according to another report.",
+                    "source": "blog",
+                },
+            ]
+        }
+
+        result = await nodes.compare_sources(state)
+
+        conflicts = result["source_comparison"]["conflicts"]
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(conflicts[0]["type"], "numeric_conflict")
+        self.assertEqual(conflicts[0]["values"], ["10", "20"])
+
 
 class AgentStreamOrchestrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_uses_same_retrieval_evaluation_and_research_loop_before_answering(self):

@@ -355,3 +355,24 @@
   - gate 的缺口会进入 `retrieval_evaluation.gaps`，便于 trace 和后续补检索使用。
 - **面试怎么讲**: “我没有完全相信 LLM 对检索质量的主观评价，而是加了一个 deterministic gate。LLM 负责语义判断，gate 负责硬约束，比如来源多样性和证据数量。两者结合比单靠 prompt 更可靠。”
 - **状态**: ✅ 已修复
+
+### Issue 29: 多源对比缺少事实冲突检测
+
+- **文件**: `backend/src/agent/nodes.py`
+- **问题**: `compare_sources` 之前只统计来源数量和来源列表，不能发现不同来源之间明显的事实冲突。
+- **影响**: 新闻场景里不同来源经常对融资金额、日期、人数、百分比等事实给出不同说法；如果不标记冲突，答案可能把冲突材料混成一个确定结论。
+- **修复**: 增加轻量 deterministic conflict detector，先检测跨来源 numeric conflict，并写入 `source_comparison.conflicts`。
+- **为什么做**: 多源不等于可信，多源之间可能互相矛盾。企业级新闻 RAG 需要告诉用户“材料之间有冲突”，而不是假装所有来源达成一致。
+- **怎么实现**:
+  - `extract_numeric_values()` 从 title/content 中提取数字。
+  - `detect_source_conflicts()` 比较不同 source 的数字集合。
+  - 如果不同来源出现不一致数字，生成 `numeric_conflict`，包含 sources、titles、values。
+  - `compare_sources()` 将 conflicts 写入 source comparison。
+- **代码位置**:
+  - `backend/src/agent/nodes.py`：`extract_numeric_values()`、`detect_source_conflicts()`、`compare_sources()`。
+  - `backend/tests/test_agent_orchestration.py`：数字冲突回归测试。
+- **运行时行为**:
+  - 如果两个来源分别说 `10 million` 和 `20 million`，`source_comparison.conflicts` 会出现一条 `numeric_conflict`。
+  - 当前是确定性 MVP，只检测明显数字冲突；后续可升级为 claim extraction + LLM/NLI conflict classification。
+- **面试怎么讲**: “我把多源对比从‘来源数量统计’推进到‘事实冲突检测’。先从新闻里最常见、最容易确定性判断的数字冲突做起，保证可测试，然后再考虑 LLM 级语义冲突判断。”
+- **状态**: ✅ 已修复
