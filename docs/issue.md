@@ -184,6 +184,22 @@
 - **问题**: 线上出问题时只能看散落日志，无法稳定知道每个节点的执行顺序、耗时、输出摘要和失败节点
 - **影响**: 难以定位问题发生在 query analysis、retrieval、re-search、generation 还是 reflection
 - **修复**: 为普通 RAG Agent 增加 `node_traces`，每个节点记录 `node`、`status`、`error_level`、`duration_ms`、紧凑输出摘要和基础成本/规模指标；流式共享编排和 LangGraph 节点都接入 trace wrapper
+- **为什么做**: Agent 的线上问题通常不是“最终报错”这么简单，而是某个中间节点输出为空、耗时异常、误触发 fallback 或检索结果规模异常。只有最终 answer 和散落日志，很难复盘一次执行链路。
+- **怎么实现**:
+  - 在 `run_traced_node()` 里统一包裹节点执行。
+  - 成功时写入 `node_traces`，包含节点名、状态、耗时、输出摘要和 metrics。
+  - 失败或 fallback 时同样写入 trace，保证异常链路也可回放。
+  - `summarize_node_output()` 只记录列表数量和 dict keys，避免把大段正文或敏感内容塞进 trace。
+- **代码位置**:
+  - `backend/src/agent/graph.py`：`run_traced_node()`、`traced_node()`、`summarize_node_output()`。
+  - `backend/src/agent/runtime.py`：`AgentRuntime.trace_metrics()`。
+  - `backend/tests/test_agent_orchestration.py`：trace 顺序和 metrics 回归测试。
+- **运行时行为**:
+  - 普通 LangGraph 路径每个节点都会追加一条 trace。
+  - 流式路径的 pre-generation 编排同样会记录 trace。
+  - retrieve 节点会记录 `retrieval_results_count` / `filtered_results_count`。
+  - answer/reflection 相关节点会记录 `answer_chars` / `unsupported_claims_count` 等指标。
+- **面试怎么讲**: “我把 Agent 的执行过程当作一条可观测流水线，而不是黑盒 prompt。每个节点都要知道耗时、输出规模、是否 fallback，这样线上回答质量差时能定位是检索、评估、补检索还是生成阶段的问题。”
 - **状态**: ✅ 已修复
 
 ### Issue 22: Research 任务状态没有持久化当前步骤
@@ -200,6 +216,23 @@
 - **问题**: 节点失败时只有抛异常或节点内部零散 fallback，缺少统一的 timeout、错误等级和 fallback 策略
 - **影响**: 可选节点失败可能中断整条链路；关键节点失败又缺少明确的 critical 标记
 - **修复**: 新增 `NodePolicy`，支持 `error_level`、`timeout_seconds` 和 `fallback_result`；trace wrapper 根据 policy 决定 fallback 或 fail-fast，并写入 trace
+- **为什么做**: Agent 里不同节点的重要性不同。检索失败可能应该中断，来源对比失败可以降级，答案反思失败可能不应该影响主答案。把这些都写在散落的 try/except 里，会让错误策略不可见、不可测试、不可复用。
+- **怎么实现**:
+  - 新增 `NodePolicy`，字段包括 `error_level`、`timeout_seconds`、`fallback_result`。
+  - `AgentRuntime.node_policies` 按节点名保存策略。
+  - `run_traced_node()` 执行节点前读取 policy。
+  - 如果配置了 `timeout_seconds`，用 `asyncio.wait_for()` 包裹节点。
+  - 如果节点异常且 policy 非 critical 且有 fallback，则返回 fallback，并写入 `status=fallback` 的 trace。
+  - 如果是 critical 或没有 fallback，则记录 error trace 后继续抛异常。
+- **代码位置**:
+  - `backend/src/agent/runtime.py`：`NodePolicy`、`AgentRuntime.policy_for()`。
+  - `backend/src/agent/graph.py`：`runtime_policy()`、`run_traced_node()` 中的 timeout/fallback/fail-fast 逻辑。
+  - `backend/tests/test_agent_orchestration.py`：`test_traced_node_uses_policy_fallback_for_handled_errors`。
+- **运行时行为**:
+  - 默认策略是 critical，节点失败会 fail-fast。
+  - 可选节点可以显式配置 handled fallback，例如 `compare_sources` 失败时返回 `{"source_comparison": None}`。
+  - fallback 不会静默吞掉错误，trace 中会记录原始 error、error_level 和 fallback 状态。
+- **面试怎么讲**: “我没有把所有异常都 catch 掉，而是按节点策略处理。关键链路 fail-fast，增强节点可降级。这样系统不会因为非核心能力失败而整体不可用，也不会把关键故障悄悄吞掉。”
 - **状态**: ✅ 已修复
 
 ### Issue 24: LLM 结构化输出缺少 schema 校验
@@ -208,6 +241,21 @@
 - **问题**: 即使能从 LLM 响应中解析出 JSON，也无法保证字段枚举、范围和类型正确
 - **影响**: 非法 action、越界 coverage、错误 intent 可能进入 Agent 控制流
 - **修复**: 新增 `QueryAnalysis` 和 `RetrievalEvaluation` Pydantic schema；LLM JSON 解析后必须通过 schema 校验，否则进入受控 fallback
+- **为什么做**: “能解析成 JSON”不等于“业务上合法”。Agent 的路由字段由 LLM 输出控制，如果模型返回 `action=delete`、`coverage=999` 或 `relevance=PERFECT`，裸 dict 会污染控制流。
+- **怎么实现**:
+  - 保留原有 `parse_json_object()`，先解决 markdown fence / 前置说明等格式问题。
+  - 新增 Pydantic schema：`QueryAnalysis` 和 `RetrievalEvaluation`。
+  - `parse_query_analysis()` 和 `parse_retrieval_evaluation()` 在 JSON 解析后执行 `model_validate()`。
+  - 校验失败会抛异常，被节点原有 fallback 捕获，进入受控默认策略。
+- **代码位置**:
+  - `backend/src/agent/schemas.py`：Pydantic schema 定义。
+  - `backend/src/agent/nodes.py`：`parse_query_analysis()`、`parse_retrieval_evaluation()`。
+  - `backend/tests/test_agent_orchestration.py`：非法 LLM 结构输出回归测试。
+- **运行时行为**:
+  - Query analysis 只接受 `factual/analysis/comparison/summary` 这类 intent。
+  - Retrieval evaluation 只接受 `HIGH/MEDIUM/LOW`、`coverage=0..100`、`action=proceed/re_search/expand`。
+  - 非法结构不会进入 `should_research()` 等路由逻辑，而是触发 fallback。
+- **面试怎么讲**: “LLM 输出要过两层门：第一层是解析成 JSON，第二层是 schema 校验。尤其是 action 这种控制流字段不能相信模型随便给，否则 Agent 就会被非法结构牵着走。”
 - **状态**: ✅ 已修复
 
 ### Issue 25: DB schema 改动缺少 migration
@@ -216,4 +264,71 @@
 - **问题**: 只改 ORM 和 `schema.sql` 不会自动更新已有数据库
 - **影响**: 已部署环境查询/写入 `current_step` 时可能因列不存在失败
 - **修复**: 增加幂等 migration SQL：`ALTER TABLE research_tasks ADD COLUMN IF NOT EXISTS current_step VARCHAR(32)`
+- **为什么做**: ORM 和 `schema.sql` 只描述“新环境应该长什么样”，不会自动修改已经存在的生产数据库。之前给 `ResearchTask` 增加 `current_step` 后，如果线上表没有这个列，后台任务写进度会直接失败。
+- **怎么实现**:
+  - 新增 `backend/migrations/001_add_research_current_step.sql`。
+  - 使用 `ADD COLUMN IF NOT EXISTS` 保证幂等。
+  - 保持 ORM、`docs/schema.sql` 和 migration 三者一致。
+  - 增加测试检查 migration 文件存在且包含幂等加列语句。
+- **代码位置**:
+  - `backend/migrations/001_add_research_current_step.sql`：真实迁移 SQL。
+  - `backend/src/db/models.py`：`ResearchTask.current_step` ORM 字段。
+  - `docs/schema.sql`：全量建表 schema。
+  - `backend/tests/test_schema_migrations.py`：migration 回归测试。
+- **运行时行为**:
+  - 新环境可以通过 `schema.sql` 创建带 `current_step` 的表。
+  - 旧环境执行 migration 后补齐 `current_step` 列。
+  - migration 可重复执行，不会因为列已存在而失败。
+- **面试怎么讲**: “改 ORM 不是数据库迁移。生产库已经有表和数据，必须用 migration 把旧 schema 演进到新 schema。我用了幂等 SQL，确保多环境、多次执行都安全。”
+- **状态**: ✅ 已修复
+
+### Issue 26: Agent trace 缺少成本和规模指标
+
+- **文件**: `backend/src/agent/runtime.py`, `backend/src/agent/graph.py`
+- **问题**: 只有节点耗时还不够，无法判断某个节点是不是输出过大、检索为空、答案过长、unsupported claims 过多，后续也不方便接真实 token/cost。
+- **影响**: 线上成本和质量问题难以归因。例如一次回答变慢，可能是检索结果太多、上下文太长、生成答案过长或反思发现太多未支撑断言。
+- **修复**: `AgentRuntime.trace_metrics()` 为节点输出生成基础 metrics，包括 `approx_output_tokens`、`retrieval_results_count`、`filtered_results_count`、`sources_count`、`answer_chars`、`unsupported_claims_count`。
+- **为什么做**: Agent 成本不只来自最终生成，也来自中间节点的上下文规模和工具调用规模。先建立统一 metrics 结构，后续才能把 provider usage、真实 token 和费用接进来。
+- **怎么实现**:
+  - 在 `AgentRuntime.trace_metrics()` 中根据节点 output 提取指标。
+  - 用 `len(str(output)) // 4` 估算 `approx_output_tokens`，作为没有 provider usage 时的粗粒度代理指标。
+  - 对常见列表输出记录 count，避免 trace 里塞完整内容。
+  - 对答案和答案反思记录 `answer_chars`、`unsupported_claims_count`。
+  - `run_traced_node()` 把 metrics 写入每条 `node_traces`。
+- **代码位置**:
+  - `backend/src/agent/runtime.py`：`trace_metrics()`、`_approx_tokens()`。
+  - `backend/src/agent/graph.py`：trace event 中写入 `metrics`。
+  - `backend/tests/test_agent_orchestration.py`：验证 retrieve trace 包含 `retrieval_results_count` 和 `approx_output_tokens`。
+- **运行时行为**:
+  - 每个节点 trace 都会带 `metrics`。
+  - retrieve 节点可以看到检索结果数量。
+  - generation/reflection 节点可以看到答案长度和未支撑 claim 数。
+  - 当前 token 是近似值，后续可替换或补充真实 LLM usage。
+- **面试怎么讲**: “我先不假装已经有完整计费系统，而是先把成本观测的接口打出来。trace 里有输出规模、结果数量、答案长度和近似 token，后续接真实 provider usage 时只需要丰富 metrics，不需要重做观测模型。”
+- **状态**: ✅ 已修复
+
+### Issue 27: 答案缺少 claim-level citation binding
+
+- **文件**: `backend/src/agent/nodes.py`, `backend/src/agent/graph.py`, `backend/src/api/models.py`, `backend/src/api/routes.py`
+- **问题**: 之前只返回 sources 列表，无法知道答案中每个具体 claim 由哪些来源支撑。
+- **影响**: 用户无法逐句核查答案；自动评估也只能粗略判断“有无来源”，无法判断 claim 和 source 的绑定关系。
+- **修复**: 增加 deterministic citation binding：将答案切分为 claims，为每个 claim 匹配最相关 source indexes，输出 `support_level` 和 `support_score`；非流式响应和流式 done 事件都返回 `citations`。
+- **为什么做**: 新闻 RAG 的核心不是“列出来源”，而是“每个结论都能追溯到来源”。claim-level citation 是后续 hover citation、自动评估和 groundedness 升级的基础。
+- **怎么实现**:
+  - `split_answer_claims()` 将答案切成 claim-sized sentences。
+  - `tokenize_for_support()` 提取中英文 token。
+  - `score_claim_support()` 计算 claim 和单个 source 的 token overlap。
+  - `bind_claim_citations()` 为每个 claim 选择 strongest supporting sources，并输出 `supported/partial/unsupported`。
+  - `self_reflect()` 返回 `citations`，并基于 citation support 生成 `unsupported_claims`。
+- **代码位置**:
+  - `backend/src/agent/nodes.py`：claim 切分、source 匹配、citation binding。
+  - `backend/src/agent/graph.py`：流式完成后执行 `self_reflect` 并在 done 事件返回 citations。
+  - `backend/src/api/models.py`：`Citation` / `QueryResponse.citations`。
+  - `backend/src/api/routes.py`：非流式响应携带 citations。
+  - `backend/tests/test_agent_orchestration.py`：claim-to-source binding 回归测试。
+- **运行时行为**:
+  - 每条 citation 包含 `claim`、`source_indexes`、`support_level`、`support_score`。
+  - source index 使用 1-based 编号，对齐返回 sources 的展示顺序。
+  - 无支撑 claim 会返回空 `source_indexes` 且 `support_level=unsupported`。
+- **面试怎么讲**: “我把 citation 从文档级提升到 claim 级。不是简单把 sources 附在答案后面，而是让每个具体判断都绑定到来源。这样既能提高用户信任，也能为后续自动评估和 NLI groundedness 打基础。”
 - **状态**: ✅ 已修复

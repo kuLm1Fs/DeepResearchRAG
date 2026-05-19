@@ -260,6 +260,10 @@ async def run_agent_stream(query: str, trace_id: str = "", top_k: int = 5) -> As
         async for token in generate_answer_stream(state):
             answer_parts.append(token)
             yield {"type": "token", "data": token}
+
+        state["answer"] = "".join(answer_parts)
+        state["sources"] = sources
+        state.update(await run_traced_node("self_reflect", self_reflect, state))
     except Exception as e:
         logger.error("stream_agent_failed", error=str(e))
         yield {"type": "error", "data": str(e)}
@@ -269,6 +273,8 @@ async def run_agent_stream(query: str, trace_id: str = "", top_k: int = 5) -> As
         "data": {
             "answer": "".join(answer_parts),
             "sources": sources,
+            "citations": state.get("citations", []),
+            "answer_reflection": state.get("answer_reflection", {}),
             "trace_id": trace_id,
         },
     }

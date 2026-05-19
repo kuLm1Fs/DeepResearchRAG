@@ -12,6 +12,7 @@ class AgentState(TypedDict, total=False):
     filtered_results: list[dict]         # Filtered results
     answer: str                          # Generated answer
     sources: list[dict]                  # Source citations
+    citations: list[dict]                # Claim-to-source citation bindings
     retrieval_evaluation: dict[str, Any] # Retrieval relevance and re-search decision
     answer_reflection: dict[str, Any]    # Answer quality self-reflection result
     reflection: dict[str, Any]           # Backward-compatible retrieval evaluation alias

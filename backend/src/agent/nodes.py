@@ -136,28 +136,65 @@ def tokenize_for_support(text: str) -> set[str]:
     }
 
 
+def score_claim_support(claim: str, source: dict) -> tuple[float, int]:
+    claim_tokens = tokenize_for_support(claim)
+    if not claim_tokens:
+        return 0.0, 0
+
+    source_tokens = tokenize_for_support(
+        f"{source.get('title', '')} {source.get('content', '')}"
+    )
+    overlap = claim_tokens & source_tokens
+    return len(overlap) / len(claim_tokens), len(overlap)
+
+
+def support_level(score: float, overlap_count: int) -> str:
+    if score >= 0.6 or overlap_count >= 5:
+        return "supported"
+    if score >= 0.35 or overlap_count >= 3:
+        return "partial"
+    return "unsupported"
+
+
+def bind_claim_citations(answer: str, sources: list[dict], max_sources: int = 2) -> list[dict]:
+    """Bind each answer claim to the strongest supporting source indexes."""
+    citations = []
+    for claim in split_answer_claims(answer):
+        scored_sources = []
+        for index, source in enumerate(sources, start=1):
+            score, overlap_count = score_claim_support(claim, source)
+            if score > 0:
+                scored_sources.append((score, overlap_count, index))
+
+        scored_sources.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        best_score, best_overlap = (scored_sources[0][0], scored_sources[0][1]) if scored_sources else (0.0, 0)
+        level = support_level(best_score, best_overlap)
+        source_indexes = [
+            index
+            for score, overlap_count, index in scored_sources[:max_sources]
+            if support_level(score, overlap_count) != "unsupported"
+        ]
+
+        citations.append({
+            "claim": claim,
+            "source_indexes": source_indexes,
+            "support_level": level if source_indexes else "unsupported",
+            "support_score": round(best_score, 3),
+        })
+
+    return citations
+
+
 def find_unsupported_claims(answer: str, sources: list[dict]) -> list[str]:
     """Flag answer sentences that have weak lexical support in retrieved sources."""
     if not answer or not sources:
         return []
 
-    source_text = " ".join(
-        f"{source.get('title', '')} {source.get('content', '')}"
-        for source in sources
-    )
-    source_tokens = tokenize_for_support(source_text)
-    unsupported = []
-
-    for claim in split_answer_claims(answer):
-        claim_tokens = tokenize_for_support(claim)
-        if not claim_tokens:
-            continue
-        overlap = claim_tokens & source_tokens
-        support_ratio = len(overlap) / len(claim_tokens)
-        if support_ratio < 0.45 and len(overlap) < 4:
-            unsupported.append(claim)
-
-    return unsupported
+    return [
+        citation["claim"]
+        for citation in bind_claim_citations(answer, sources)
+        if citation["support_level"] == "unsupported"
+    ]
 
 
 async def analyze_query(state: dict) -> dict:
@@ -425,7 +462,13 @@ async def self_reflect(state: dict) -> dict:
     if not has_citation:
         issues.append("答案未引用检索来源")
 
-    unsupported_claims = find_unsupported_claims(answer, sources or results)
+    citation_sources = sources or results
+    citations = bind_claim_citations(answer, citation_sources)
+    unsupported_claims = [
+        citation["claim"]
+        for citation in citations
+        if citation["support_level"] == "unsupported"
+    ]
     if unsupported_claims:
         issues.append("存在未被来源支撑的断言")
 
@@ -435,6 +478,7 @@ async def self_reflect(state: dict) -> dict:
     quality = quality_map.get(min(num_issues, 3), "POOR")
 
     return {
+        "citations": citations,
         "answer_reflection": {
             "quality": quality,
             "issues": issues,

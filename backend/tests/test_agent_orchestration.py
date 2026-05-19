@@ -134,6 +134,42 @@ class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("存在未被来源支撑的断言", reflection["issues"])
         self.assertEqual(reflection["unsupported_claims"], ["Revenue doubled this quarter."])
 
+    async def test_self_reflect_binds_claims_to_supporting_sources(self):
+        state = {
+            "answer": (
+                "OpenAI released a new enterprise agent platform. "
+                "Microsoft expanded Copilot for finance teams. "
+                "Revenue doubled this quarter."
+            ),
+            "sources": [
+                {
+                    "title": "OpenAI enterprise platform",
+                    "content": "OpenAI released a new enterprise agent platform for business workflows.",
+                    "source": "wire",
+                    "category": "Business",
+                    "score": 0.9,
+                },
+                {
+                    "title": "Microsoft Copilot finance",
+                    "content": "Microsoft expanded Copilot features for finance teams and analysts.",
+                    "source": "wire",
+                    "category": "Business",
+                    "score": 0.8,
+                },
+            ],
+            "retrieval_results": [],
+        }
+
+        result = await nodes.self_reflect(state)
+        citations = result["citations"]
+
+        self.assertEqual(len(citations), 3)
+        self.assertEqual(citations[0]["source_indexes"], [1])
+        self.assertEqual(citations[0]["support_level"], "supported")
+        self.assertEqual(citations[1]["source_indexes"], [2])
+        self.assertEqual(citations[2]["source_indexes"], [])
+        self.assertEqual(citations[2]["support_level"], "unsupported")
+
     async def test_prepare_answer_state_records_node_trace_events(self):
         class FakeLLM:
             async def chat(self, messages):

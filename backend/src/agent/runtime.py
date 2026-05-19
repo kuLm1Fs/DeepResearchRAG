@@ -70,6 +70,13 @@ class AgentRuntime:
             unsupported = answer_reflection.get("unsupported_claims", [])
             metrics["unsupported_claims_count"] = len(unsupported)
 
+        if isinstance(output.get("citations"), list):
+            metrics["citations_count"] = len(output["citations"])
+            metrics["unsupported_citations_count"] = sum(
+                1 for item in output["citations"]
+                if item.get("support_level") == "unsupported"
+            )
+
         return metrics
 
 

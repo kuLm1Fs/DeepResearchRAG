@@ -19,10 +19,18 @@ class Source(BaseModel):
     score: float
 
 
+class Citation(BaseModel):
+    claim: str
+    source_indexes: list[int]
+    support_level: str
+    support_score: float
+
+
 class QueryResponse(BaseModel):
     answer: str
     sources: list[Source]
     trace_id: str
+    citations: list[Citation] = Field(default_factory=list)
 
 
 class StatsResponse(BaseModel):
