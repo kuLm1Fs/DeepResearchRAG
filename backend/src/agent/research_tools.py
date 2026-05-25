@@ -1,11 +1,12 @@
 """5个 Tool Function 实现（Stub）"""
 import asyncio
-import json
 import uuid
 from datetime import datetime
 from typing import Any
 
-from ..core import settings, get_logger
+from core import settings, get_logger
+
+from .nodes import parse_json_object
 
 logger = get_logger(__name__)
 
@@ -34,13 +35,17 @@ def planner(query: str, user_id: str | None = None) -> dict[str, Any]:
             "gaps": list[str]
         }
     """
-    # 检查 LLM 配置
+    return asyncio.run(aplanner(query=query, user_id=user_id))
+
+
+async def aplanner(query: str, user_id: str | None = None) -> dict[str, Any]:
+    """Async planner for use inside FastAPI/LangGraph async execution."""
     if not settings.deepseek_api_key and not settings.openai_api_key and not settings.qwen_api_key:
         logger.warning("planner: no LLM API key configured, returning stub")
         return _stub_planner(query)
 
     try:
-        return _call_llm_planner(query)
+        return await _async_llm_planner(query)
     except Exception as e:
         logger.error("planner LLM call failed", error=str(e))
         return _error_result(str(e))
@@ -53,7 +58,7 @@ def _call_llm_planner(query: str) -> dict[str, Any]:
 
 async def _async_llm_planner(query: str) -> dict[str, Any]:
     """调用 LLM 生成研究计划（async）"""
-    from ..llm import create_llm
+    from llm import create_llm
 
     llm = create_llm(
         provider=settings.llm_provider,
@@ -91,15 +96,7 @@ async def _async_llm_planner(query: str) -> dict[str, Any]:
 
     # 解析 JSON
     try:
-        # 尝试提取 JSON 代码块
-        if "```json" in response:
-            json_str = response.split("```json")[1].split("```")[0].strip()
-        elif "```" in response:
-            json_str = response.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = response.strip()
-
-        data = json.loads(json_str)
+        data = parse_json_object(response)
         return {
             "task_id": str(uuid.uuid4())[:8],
             "status": "success",
@@ -107,7 +104,7 @@ async def _async_llm_planner(query: str) -> dict[str, Any]:
             "errors": [],
             "gaps": []
         }
-    except json.JSONDecodeError as e:
+    except ValueError as e:
         logger.warning("planner JSON parse failed", error=str(e), response=response[:200])
         # Fallback: 返回一个基础计划
         return _stub_planner(query)
@@ -178,8 +175,8 @@ def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = No
         }
 
     try:
-        from ..vectorstore.embedding import get_embedding_sync
-        from ..vectorstore.milvus_store import MilvusStore
+        from vectorstore.embedding import get_embedding_sync
+        from vectorstore.milvus_store import MilvusStore
 
         store = MilvusStore()
 
@@ -269,6 +266,11 @@ def analyst(evidence: list[dict], focus: str = "all") -> dict[str, Any]:
             "gaps": list[str]
         }
     """
+    return asyncio.run(aanalyst(evidence=evidence, focus=focus))
+
+
+async def aanalyst(evidence: list[dict], focus: str = "all") -> dict[str, Any]:
+    """Async analyst for use inside FastAPI/LangGraph async execution."""
     task_id = str(uuid.uuid4())[:8]
 
     if not evidence:
@@ -289,7 +291,7 @@ def analyst(evidence: list[dict], focus: str = "all") -> dict[str, Any]:
         return _stub_analyst(focus)
 
     try:
-        return _call_analyst(evidence, focus)
+        return await _async_analyst(evidence, focus)
     except Exception as e:
         logger.error("analyst LLM call failed", error=str(e))
         return _error_analyst(str(e))
@@ -301,7 +303,7 @@ def _call_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
 
 async def _async_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
     """调用 LLM 分析证据（async）"""
-    from ..llm import create_llm
+    from llm import create_llm
 
     llm = create_llm(
         provider=settings.llm_provider,
@@ -345,13 +347,7 @@ async def _async_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
     response = await llm.chat(messages)
 
     try:
-        if "```json" in response:
-            json_str = response.split("```json")[1].split("```")[0].strip()
-        elif "```" in response:
-            json_str = response.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = response.strip()
-        data = json.loads(json_str)
+        data = parse_json_object(response)
         return {
             "task_id": str(uuid.uuid4())[:8],
             "status": "success",
@@ -359,8 +355,8 @@ async def _async_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
             "errors": [],
             "gaps": []
         }
-    except json.JSONDecodeError:
-        logger.warning("analyst JSON parse failed, using stub")
+    except ValueError as e:
+        logger.warning("analyst JSON parse failed, using stub", error=str(e))
         return _stub_analyst(focus)
 
 
@@ -412,6 +408,11 @@ def checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
             "gaps": list[str]
         }
     """
+    return asyncio.run(achecker(claims=claims, evidence=evidence))
+
+
+async def achecker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
+    """Async checker for use inside FastAPI/LangGraph async execution."""
     task_id = str(uuid.uuid4())[:8]
 
     # 空 evidence → 返回 stub（不调用 LLM）
@@ -435,7 +436,7 @@ def checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
         return _stub_checker(claims, evidence)
 
     try:
-        return _call_checker(claims, evidence)
+        return await _async_checker(claims, evidence)
     except Exception as e:
         logger.error("checker LLM call failed", error=str(e))
         return _error_checker(str(e))
@@ -448,7 +449,7 @@ def _call_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
 
 async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
     """调用 LLM 进行事实核查（async）"""
-    from ..llm import create_llm
+    from llm import create_llm
 
     llm = create_llm(
         provider=settings.llm_provider,
@@ -494,13 +495,7 @@ async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, 
     response = await llm.chat(messages)
 
     try:
-        if "```json" in response:
-            json_str = response.split("```json")[1].split("```")[0].strip()
-        elif "```" in response:
-            json_str = response.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = response.strip()
-        data = json.loads(json_str)
+        data = parse_json_object(response)
         return {
             "task_id": str(uuid.uuid4())[:8],
             "status": "success",
@@ -508,8 +503,8 @@ async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, 
             "errors": [],
             "gaps": []
         }
-    except json.JSONDecodeError:
-        logger.warning("checker JSON parse failed, using stub")
+    except ValueError as e:
+        logger.warning("checker JSON parse failed, using stub", error=str(e))
         return _stub_checker(claims, evidence)
 
 
@@ -562,12 +557,20 @@ def writer(analysis: dict, check_result: dict | None, output_format: str = "both
             "gaps": list[str]
         }
     """
-    # 无 LLM key → 返回 stub
+    return asyncio.run(awriter(analysis=analysis, check_result=check_result, output_format=output_format))
+
+
+async def awriter(
+    analysis: dict,
+    check_result: dict | None,
+    output_format: str = "both",
+) -> dict[str, Any]:
+    """Async writer for use inside FastAPI/LangGraph async execution."""
     if not settings.deepseek_api_key and not settings.openai_api_key and not settings.qwen_api_key:
         return _stub_writer(analysis, check_result)
 
     try:
-        return _call_writer(analysis, check_result, output_format)
+        return await _async_writer(analysis, check_result, output_format)
     except Exception as e:
         logger.error("writer LLM call failed", error=str(e))
         return _error_writer(str(e))
@@ -671,14 +674,7 @@ async def _build_ppt_content(
     response = await llm.chat(messages)
 
     try:
-        if "```json" in response:
-            json_str = response.split("```json")[1].split("```")[0].strip()
-        elif "```" in response:
-            json_str = response.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = response.strip()
-
-        ppt_data = json.loads(json_str)
+        ppt_data = parse_json_object(response)
 
         ppt_outline = {
             "title": ppt_data.get("title", "研究报告"),
@@ -692,7 +688,7 @@ async def _build_ppt_content(
 
         return ppt_outline, slides
 
-    except (json.JSONDecodeError, Exception) as e:
+    except Exception as e:
         logger.warning("PPT generation failed, using fallback", error=str(e))
         # Fallback: 生成默认 PPT 结构
         return _generate_fallback_ppt(audience)
@@ -726,7 +722,7 @@ def _generate_fallback_ppt(audience: str) -> tuple[dict, list[dict]]:
 
 async def _async_writer(analysis: dict, check_result: dict | None, output_format: str) -> dict[str, Any]:
     """调用 LLM 生成 Markdown 报告（async）"""
-    from ..llm import create_llm
+    from llm import create_llm
 
     llm = create_llm(
         provider=settings.llm_provider,

@@ -5,7 +5,7 @@ import json
 from core import get_logger, settings
 from vectorstore import MilvusStore
 
-from .models import QueryRequest, QueryResponse, StatsResponse, HealthResponse, Source, IngestTriggerRequest, IngestTriggerResponse, IngestStatusResponse
+from .models import QueryRequest, QueryResponse, StatsResponse, HealthResponse, Source, Citation, IngestTriggerRequest, IngestTriggerResponse, IngestStatusResponse
 from .auth import router as auth_router
 from .research import router as research_router
 
@@ -67,14 +67,21 @@ async def query(request: QueryRequest, req: Request):
 
         answer = result.get("answer", "")
         sources = result.get("sources", [])
+        citations = result.get("citations", [])
 
         async def event_generator():
             sources_data = [Source(**s) if isinstance(s, dict) else s for s in sources]
+            citations_data = [Citation(**c) if isinstance(c, dict) else c for c in citations]
             yield {
                 "event": "sources",
                 "data": json.dumps({"type": "sources", "data": [s.model_dump() for s in sources_data]}, ensure_ascii=False),
             }
-            response = QueryResponse(answer=answer, sources=sources_data, trace_id=trace_id)
+            response = QueryResponse(
+                answer=answer,
+                sources=sources_data,
+                trace_id=trace_id,
+                citations=citations_data,
+            )
             yield {
                 "event": "done",
                 "data": json.dumps({"type": "done", "data": response.model_dump()}, ensure_ascii=False),

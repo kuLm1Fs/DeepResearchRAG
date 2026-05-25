@@ -34,3 +34,4 @@ class ResearchState(TypedDict, total=False):
     failed_step: str | None            # 失败步骤
     retry_count: int                   # 重试次数
     error: str | None                  # 错误信息
+    on_step: Any                       # Optional async progress callback

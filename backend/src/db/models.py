@@ -75,6 +75,7 @@ class ResearchTask(Base):
     title: Mapped[str] = mapped_column(String(1024), nullable=False)
     query: Mapped[Optional[str]] = mapped_column(String(4096))
     status: Mapped[str] = mapped_column(String(32), default="pending")
+    current_step: Mapped[Optional[str]] = mapped_column(String(32))
     result_summary: Mapped[Optional[str]] = mapped_column(Text)
     result_markdown: Mapped[Optional[str]] = mapped_column(Text)
     result_slides: Mapped[Optional[dict]] = mapped_column(JSONB)
