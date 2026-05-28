@@ -1,4 +1,4 @@
-import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, QueryRequest, QueryResponse, Source, LoginRequest, RegisterRequest, AuthResponse, RefreshRequest, RefreshResponse, UserInfo } from '../types'
+import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, QueryRequest, QueryResponse, Source, LoginRequest, RegisterRequest, AuthResponse, RefreshRequest, RefreshResponse, UserInfo, ResearchTaskResponse } from '../types'
 
 const API_BASE = '/api'
 
@@ -6,9 +6,11 @@ export type { QueryRequest, QueryResponse, Source }
 
 export interface Stats {
   total_articles: number
+  total_chunks?: number
   sources: Record<string, number>
   categories: Record<string, number>
   languages: Record<string, number>
+  last_updated?: string | null
 }
 
 /**
@@ -22,6 +24,10 @@ export async function fetchWithErrorHandling<T>(url: string, options?: RequestIn
 
   const response = await fetch(url, {
     ...options,
+    headers: {
+      ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
+      ...(options?.headers || {}),
+    },
     signal,
   })
 
@@ -110,4 +116,17 @@ export async function refreshToken(req: RefreshRequest): Promise<RefreshResponse
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   })
+}
+
+export async function createResearchTask(query: string): Promise<ResearchTaskResponse> {
+  return fetchWithErrorHandling<ResearchTaskResponse>(`${API_BASE}/research`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, output_format: 'both', time_window: 'last_3_months', top_k: 10 }),
+  })
+}
+
+export function researchEventsUrl(taskId: string): string {
+  const token = getAccessToken()
+  return `${API_BASE}/research/${taskId}/events?token=${encodeURIComponent(token || '')}`
 }
