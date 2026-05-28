@@ -42,7 +42,10 @@ export async function fetchWithErrorHandling<T>(url: string, options?: RequestIn
 export async function query(request: QueryRequest): Promise<Response> {
   return fetch(`${API_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
+    },
     body: JSON.stringify(request),
   })
 }
