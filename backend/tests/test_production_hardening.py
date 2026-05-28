@@ -14,6 +14,7 @@ from src.agent import nodes
 from src.agent.runtime import AgentRuntime
 from src.api import auth as auth_api
 from src.api import routes as api_routes
+from src.core import config as core_config
 from src.llm.cache import CachedLLM
 from src.retrieval.retriever import MultiPathRetriever, build_like_expr, escape_milvus_like_value
 from src.vectorstore import embedding
@@ -26,6 +27,16 @@ class ProductionSettingsTests(unittest.TestCase):
         self.assertTrue(settings.is_prod)
         self.assertFalse(settings.debug_enabled)
         self.assertFalse(settings.llm_cache_enabled)
+
+    def test_backend_paths_resolve_to_backend_owned_assets(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        backend_root = repo_root / "backend"
+        settings = Settings()
+
+        self.assertEqual(settings.project_root, repo_root)
+        self.assertEqual(core_config._env_file, backend_root / "configs" / ".env.dev")
+        self.assertEqual(settings.data_dir, backend_root / "data")
+        self.assertEqual(settings.prompt_dir, backend_root / "src" / "agent" / "templates")
 
     def test_agent_runtime_uses_effective_cache_flag(self):
         llm = object()

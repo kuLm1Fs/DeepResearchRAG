@@ -1,10 +1,17 @@
+import os
 from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Dynamically resolve paths relative to this config file
-# config.py is at: backend/src/core/config.py → go up 4 levels to project root
-_project_root = Path(__file__).parent.parent.parent.parent
-_env_file = _project_root / "configs" / ".env.dev"
+# config.py is at: backend/src/core/config.py
+_backend_root = Path(__file__).resolve().parents[2]
+_project_root = _backend_root.parent
+_env_file = Path(
+    os.getenv("RAG_ENV_FILE")
+    or os.getenv("ENV_FILE")
+    or _backend_root / "configs" / ".env.dev"
+)
 
 
 class Settings(BaseSettings):
@@ -49,6 +56,7 @@ class Settings(BaseSettings):
     # Observability
     llm_cache: bool = True
     log_level: str = "DEBUG"
+    cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
     # LangSmith
     langchain_api_key: str = ""
@@ -69,19 +77,51 @@ class Settings(BaseSettings):
     postgres_user: str = "rag_user"
     postgres_password: str = ""
 
-    # Paths
-    project_root: Path = _project_root
-    data_dir: Path = project_root / "data"
-    llm_cache_dir: Path = data_dir / "llm_cache"
-    eval_results_dir: Path = data_dir / "eval_results"
-    prompt_dir: Path = project_root / "backend" / "src" / "agent" / "templates"
-
     # Prompt versioning
     prompt_version: str = "v1"
 
     @property
+    def project_root(self) -> Path:
+        return _project_root
+
+    @property
+    def backend_root(self) -> Path:
+        return _backend_root
+
+    @property
+    def data_dir(self) -> Path:
+        return self.backend_root / "data"
+
+    @property
+    def llm_cache_dir(self) -> Path:
+        return self.data_dir / "llm_cache"
+
+    @property
+    def eval_results_dir(self) -> Path:
+        return self.data_dir / "eval_results"
+
+    @property
+    def prompt_dir(self) -> Path:
+        return self.backend_root / "src" / "agent" / "templates"
+
+    @property
     def is_prod(self) -> bool:
         return self.env == "prod"
+
+    @property
+    def debug_enabled(self) -> bool:
+        return False if self.is_prod else self.debug
+
+    @property
+    def llm_cache_enabled(self) -> bool:
+        return False if self.is_prod else self.llm_cache
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        if self.is_prod:
+            return [origin for origin in origins if origin != "*"]
+        return origins or ["http://localhost:5173", "http://localhost:3000"]
 
 
 settings = Settings()
