@@ -305,7 +305,10 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
 
         background_tasks = FakeBackgroundTasks()
 
-        with patch("ingestion.Pipeline", return_value=FakePipeline()):
+        with (
+            patch("ingestion.Pipeline", return_value=FakePipeline()),
+            patch.object(api_routes, "reserve_company_quota", return_value=(True, None)),
+        ):
             response = await api_routes.ingest_trigger(
                 api_routes.IngestTriggerRequest(source="rss", limit=10),
                 background_tasks=background_tasks,
@@ -316,3 +319,38 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(response.task_id)
         self.assertEqual(len(background_tasks.tasks), 1)
         self.assertEqual(response.articles_collected, 0)
+
+    async def test_ingest_trigger_rejects_when_company_quota_is_exhausted(self):
+        class User:
+            id = "user_456"
+            company_id = "comp_123"
+
+        class FakeBackgroundTasks:
+            def __init__(self):
+                self.tasks = []
+
+            def add_task(self, func, *args, **kwargs):
+                self.tasks.append((func, args, kwargs))
+
+        class FakePipeline:
+            def register_defaults(self):
+                pass
+
+            def list_collectors(self):
+                return ["rss"]
+
+        background_tasks = FakeBackgroundTasks()
+
+        with (
+            patch("ingestion.Pipeline", return_value=FakePipeline()),
+            patch.object(api_routes, "reserve_company_quota", return_value=(False, "quota exceeded")),
+        ):
+            response = await api_routes.ingest_trigger(
+                api_routes.IngestTriggerRequest(source="rss", limit=10),
+                background_tasks=background_tasks,
+                current_user=User(),
+            )
+
+        self.assertEqual(response.status, "error")
+        self.assertEqual(response.message, "quota exceeded")
+        self.assertEqual(background_tasks.tasks, [])

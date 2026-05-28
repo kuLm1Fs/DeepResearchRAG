@@ -3,11 +3,12 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import PlainTextResponse
+from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from core import get_logger, settings
 from core.metrics import metrics_registry
-from db import check_connection
+from db import Company, check_connection, get_db_session
 from retrieval.retriever import build_filter_expr
 from vectorstore import MilvusStore
 
@@ -57,6 +58,24 @@ def build_current_user_filters(current_user) -> dict[str, str]:
 
 def build_current_user_expr(current_user) -> str:
     return build_filter_expr(build_current_user_filters(current_user)) or "id >= 0"
+
+
+async def reserve_company_quota(current_user, units: int = 1) -> tuple[bool, str | None]:
+    company_id = getattr(current_user, "company_id", None)
+    if not company_id:
+        return False, "Current user is not associated with a company"
+
+    async with get_db_session() as db:
+        result = await db.execute(select(Company).where(Company.id == company_id))
+        company = result.scalar_one_or_none()
+        if not company:
+            return False, "Company not found"
+
+        if company.quota_used + units > company.quota_limit:
+            return False, "quota exceeded"
+
+        company.quota_used += units
+        return True, None
 
 
 async def run_ingest_task(
@@ -295,6 +314,14 @@ async def ingest_trigger(
                     source=collector_name,
                     message=f"Collector '{collector_name}' not found",
                 )
+
+        quota_ok, quota_error = await reserve_company_quota(current_user)
+        if not quota_ok:
+            return IngestTriggerResponse(
+                status="error",
+                source=collector_name,
+                message=quota_error or "quota exceeded",
+            )
 
         task_id = f"ingest_{uuid.uuid4().hex[:12]}"
         ingest_tasks[task_id] = {
