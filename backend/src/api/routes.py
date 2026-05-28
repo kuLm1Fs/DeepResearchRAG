@@ -1,7 +1,7 @@
 import json
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
@@ -241,12 +241,7 @@ async def get_stats(current_user=Depends(get_current_user)):
     except Exception as e:
         logger.error("stats_failed", error=str(e))
         metrics_registry.increment("rag_stats_errors_total")
-        return StatsResponse(
-            total_articles=0,
-            sources={},
-            categories={},
-            languages={},
-        )
+        raise HTTPException(status_code=503, detail="Stats service unavailable") from e
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -388,11 +383,7 @@ async def ingest_status(current_user=Depends(get_current_user)):
     except Exception as e:
         logger.error("ingest_status_failed", error=str(e))
         metrics_registry.increment("rag_ingest_status_errors_total")
-        return IngestStatusResponse(
-            total_articles=0,
-            sources={},
-            collectors=[],
-        )
+        raise HTTPException(status_code=503, detail="Ingest status service unavailable") from e
 
 
 @router.get("/metrics", response_class=PlainTextResponse)

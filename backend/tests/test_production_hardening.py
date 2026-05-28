@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import HTTPException
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -354,3 +356,40 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, "error")
         self.assertEqual(response.message, "quota exceeded")
         self.assertEqual(background_tasks.tasks, [])
+
+    async def test_stats_raises_service_unavailable_when_store_fails(self):
+        class User:
+            id = "user_456"
+            company_id = "comp_123"
+
+        class FailingStore:
+            def query(self, expr, output_fields=None, limit=100):
+                raise RuntimeError("milvus unavailable")
+
+        with patch.object(api_routes, "MilvusStore", return_value=FailingStore()):
+            with self.assertRaises(HTTPException) as raised:
+                await api_routes.get_stats(current_user=User())
+
+        self.assertEqual(raised.exception.status_code, 503)
+
+    async def test_ingest_status_raises_service_unavailable_when_store_fails(self):
+        class User:
+            id = "user_456"
+            company_id = "comp_123"
+
+        class FakePipeline:
+            def register_defaults(self):
+                pass
+
+        class FailingStore:
+            def query(self, expr, output_fields=None, limit=100):
+                raise RuntimeError("milvus unavailable")
+
+        with (
+            patch.object(api_routes, "MilvusStore", return_value=FailingStore()),
+            patch("ingestion.Pipeline", return_value=FakePipeline()),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await api_routes.ingest_status(current_user=User())
+
+        self.assertEqual(raised.exception.status_code, 503)
