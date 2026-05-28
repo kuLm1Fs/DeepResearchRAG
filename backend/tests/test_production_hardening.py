@@ -13,6 +13,7 @@ from src.agent import graph as agent_graph
 from src.agent import nodes
 from src.agent.runtime import AgentRuntime
 from src.api import auth as auth_api
+from src.api import routes as api_routes
 from src.llm.cache import CachedLLM
 from src.retrieval.retriever import MultiPathRetriever, build_like_expr, escape_milvus_like_value
 from src.vectorstore import embedding
@@ -195,3 +196,69 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(state["filters"], {"company_id": "comp_123", "language": "zh"})
+
+    async def test_stats_uses_tenant_scoped_milvus_query(self):
+        class User:
+            id = "user_456"
+            company_id = "comp_123"
+
+        class FakeStore:
+            def __init__(self):
+                self.exprs = []
+
+            def query(self, expr, output_fields=None, limit=100):
+                self.exprs.append(expr)
+                return [
+                    {"source": "rss", "category": "tech", "language": "zh"},
+                    {"source": "hn", "category": "tech", "language": "en"},
+                ]
+
+        fake_store = FakeStore()
+
+        with patch.object(api_routes, "MilvusStore", return_value=fake_store):
+            response = await api_routes.get_stats(current_user=User())
+
+        self.assertEqual(
+            fake_store.exprs,
+            ['company_id == "comp_123" and user_id == "user_456"'],
+        )
+        self.assertEqual(response.total_articles, 2)
+        self.assertEqual(response.sources, {"rss": 1, "hn": 1})
+
+    async def test_ingest_status_uses_tenant_scoped_milvus_query(self):
+        class User:
+            id = "user_456"
+            company_id = "comp_123"
+
+        class FakePipeline:
+            def register_defaults(self):
+                pass
+
+            def list_collectors(self):
+                return ["rss"]
+
+        class FakeStore:
+            def __init__(self):
+                self.exprs = []
+
+            def query(self, expr, output_fields=None, limit=100):
+                self.exprs.append(expr)
+                return [
+                    {"source": "rss"},
+                    {"source": "rss"},
+                ]
+
+        fake_store = FakeStore()
+
+        with (
+            patch.object(api_routes, "MilvusStore", return_value=fake_store),
+            patch("ingestion.Pipeline", return_value=FakePipeline()),
+        ):
+            response = await api_routes.ingest_status(current_user=User())
+
+        self.assertEqual(
+            fake_store.exprs,
+            ['company_id == "comp_123" and user_id == "user_456"'],
+        )
+        self.assertEqual(response.total_articles, 2)
+        self.assertEqual(response.sources, {"rss": 2})
