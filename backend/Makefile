@@ -8,11 +8,11 @@ install:
 	uv sync
 
 dev:
-	uv run uvicorn src.api.app:app --reload
+	uv run uvicorn src.api.app:app --reload --app-dir src
 
 ## 生产模式启动
 prod:
-	PYTHONPATH=$(PYTHONPATH) uv run uvicorn src.api.app:app --host 0.0.0.0 --port 8000
+	uv run uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --app-dir src
 
 ## 代码检查
 lint:

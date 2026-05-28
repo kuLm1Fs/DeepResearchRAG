@@ -1,11 +1,55 @@
 from typing import Any
 
-from core import get_logger, settings, RetrievalError
+from core import RetrievalError, get_logger
 from vectorstore import MilvusStore, embed_texts_async
-from .fusion import reciprocal_rank_fusion
+
 from .boost import boost_results
+from .fusion import reciprocal_rank_fusion
+from .reranker import CrossEncoderReranker
 
 logger = get_logger(__name__)
+
+
+def escape_milvus_like_value(value: str) -> str:
+    """Escape user-controlled content before embedding it in a Milvus LIKE expr."""
+    return (
+        value
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+
+
+def build_like_expr(fields: list[str], query: str) -> str:
+    escaped_query = escape_milvus_like_value(query)
+    return " or ".join(f'{field} like "%{escaped_query}%"' for field in fields)
+
+
+def escape_milvus_string_value(value: Any) -> str:
+    """Escape string content for scalar equality filters."""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def build_filter_expr(filters: dict[str, Any] | None) -> str | None:
+    """Build a Milvus scalar expr for trusted filter fields."""
+    if not filters:
+        return None
+
+    allowed_fields = {"language", "category", "source", "user_id", "company_id"}
+    clauses = []
+    for field, value in filters.items():
+        if field not in allowed_fields or value is None or value == "":
+            continue
+        clauses.append(f'{field} == "{escape_milvus_string_value(value)}"')
+
+    return " and ".join(clauses) if clauses else None
+
+
+def combine_expr(base_expr: str | None, filter_expr: str | None) -> str | None:
+    if base_expr and filter_expr:
+        return f"({base_expr}) and {filter_expr}"
+    return base_expr or filter_expr
 
 
 class MultiPathRetriever:
@@ -29,6 +73,8 @@ class MultiPathRetriever:
         semantic_limit: int = 20,
         keyword_limit: int = 20,
         title_limit: int = 10,
+        rerank_enabled: bool = True,
+        rerank_candidate_multiplier: int = 4,
     ):
         self.store = store
         self.semantic_weight = semantic_weight
@@ -37,6 +83,9 @@ class MultiPathRetriever:
         self.semantic_limit = semantic_limit
         self.keyword_limit = keyword_limit
         self.title_limit = title_limit
+        self.rerank_enabled = rerank_enabled
+        self.rerank_candidate_multiplier = rerank_candidate_multiplier
+        self.reranker = CrossEncoderReranker()
 
     async def retrieve(
         self,
@@ -62,16 +111,19 @@ class MultiPathRetriever:
         )
 
         try:
+            filter_expr = build_filter_expr(filters)
+
             # Path 1: Semantic vector search
-            semantic_results = await self._semantic_search(query)
+            semantic_results = await self._semantic_search(query, filter_expr=filter_expr)
 
             # Path 2: Keyword search
-            keyword_results = await self._keyword_search(query)
+            keyword_results = await self._keyword_search(query, filter_expr=filter_expr)
 
             # Path 3: Title exact match
-            title_results = await self._title_match(query)
+            title_results = await self._title_match(query, filter_expr=filter_expr)
 
-            # Apply filters if provided
+            # Keep an in-process filter as a defensive check for test fakes or stores
+            # that do not enforce scalar expressions.
             if filters:
                 semantic_results = self._apply_filters(semantic_results, filters)
                 keyword_results = self._apply_filters(keyword_results, filters)
@@ -100,8 +152,11 @@ class MultiPathRetriever:
                 source_weight=0.2,
             )
 
-            # Return top_k
-            final_results = boosted[:top_k]
+            if self.rerank_enabled:
+                candidate_limit = max(top_k, top_k * self.rerank_candidate_multiplier)
+                final_results = self.reranker.rerank(query, boosted[:candidate_limit], top_k)
+            else:
+                final_results = boosted[:top_k]
 
             logger.info("retrieval_completed",
                 query=query,
@@ -114,25 +169,37 @@ class MultiPathRetriever:
             logger.error("retrieval_failed", query=query, error=str(e))
             raise RetrievalError(f"Retrieval failed: {e}")
 
-    async def _semantic_search(self, query: str) -> list[dict[str, Any]]:
+    async def _semantic_search(
+        self,
+        query: str,
+        filter_expr: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Vector similarity search."""
         try:
             query_embedding = (await embed_texts_async([query]))[0]
             return self.store.search(
                 query_embedding=query_embedding,
                 top_k=self.semantic_limit,
+                expr=filter_expr,
             )
         except Exception as e:
             logger.warning("semantic_search_failed", error=str(e))
             return []
 
-    async def _keyword_search(self, query: str) -> list[dict[str, Any]]:
+    async def _keyword_search(
+        self,
+        query: str,
+        filter_expr: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Keyword/fulltext search on title and content."""
         try:
             # 搜索 title 和 content 两个字段，使用 OR 条件
             results = self.store.query(
-                expr=f'title like "%{query}%" or content like "%{query}%"',
-                output_fields=["title", "content", "source", "language", "category", "published_at", "id"],
+                expr=combine_expr(build_like_expr(["title", "content"], query), filter_expr),
+                output_fields=[
+                    "title", "content", "source", "language", "category", "published_at",
+                    "content_hash", "id", "user_id", "company_id", "url",
+                ],
                 limit=self.keyword_limit,
             )
             # 添加默认分数
@@ -143,12 +210,19 @@ class MultiPathRetriever:
             logger.warning("keyword_search_failed", error=str(e))
             return []
 
-    async def _title_match(self, query: str) -> list[dict[str, Any]]:
+    async def _title_match(
+        self,
+        query: str,
+        filter_expr: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Exact title matching."""
         try:
             results = self.store.query(
-                expr=f'title like "%{query}%"',
-                output_fields=["title", "content", "source", "language", "category", "published_at", "id"],
+                expr=combine_expr(build_like_expr(["title"], query), filter_expr),
+                output_fields=[
+                    "title", "content", "source", "language", "category", "published_at",
+                    "content_hash", "id", "user_id", "company_id", "url",
+                ],
                 limit=self.title_limit,
             )
             for r in results:
@@ -167,6 +241,10 @@ class MultiPathRetriever:
             if "category" in filters and r.get("category") != filters["category"]:
                 continue
             if "source" in filters and r.get("source") != filters["source"]:
+                continue
+            if "user_id" in filters and r.get("user_id") != filters["user_id"]:
+                continue
+            if "company_id" in filters and r.get("company_id") != filters["company_id"]:
                 continue
             filtered.append(r)
         return filtered

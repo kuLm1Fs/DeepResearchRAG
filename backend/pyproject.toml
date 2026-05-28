@@ -25,9 +25,10 @@ dependencies = [
     # Data processing
     "datasets>=2.20.0",
     "feedparser>=6.0.0",
+    "trafilatura>=1.8.0",
 
     # Embedding
-    " volcengine-python-sdk>=2.0.0",
+    "volcengine-python-sdk>=2.0.0",
 
     # Observability
     "structlog>=24.0.0",
@@ -67,7 +68,7 @@ packages = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "310"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP"]

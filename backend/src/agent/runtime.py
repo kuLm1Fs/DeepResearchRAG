@@ -40,7 +40,8 @@ class AgentRuntime:
         return MultiPathRetriever(MilvusStore())
 
     def with_answer_cache(self, llm):
-        if not self.config.llm_cache:
+        cache_enabled = getattr(self.config, "llm_cache_enabled", self.config.llm_cache)
+        if not cache_enabled:
             return llm
 
         from llm.cache import CachedLLM

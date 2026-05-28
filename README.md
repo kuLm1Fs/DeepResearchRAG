@@ -128,7 +128,7 @@ make dev
 
 ```bash
 uv sync
-uv run uvicorn src.api.app:app --reload
+uv run uvicorn src.api.app:app --reload --app-dir src
 ```
 
 后端 API 文档默认位于 http://localhost:8000/docs。
