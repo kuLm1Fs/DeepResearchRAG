@@ -262,3 +262,46 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.total_articles, 2)
         self.assertEqual(response.sources, {"rss": 2})
+
+    async def test_ingest_trigger_enqueues_background_task_without_collecting_inline(self):
+        class User:
+            id = "user_456"
+            company_id = "comp_123"
+
+        class FakeBackgroundTasks:
+            def __init__(self):
+                self.tasks = []
+
+            def add_task(self, func, *args, **kwargs):
+                self.tasks.append((func, args, kwargs))
+
+        class FakePipeline:
+            collected_inline = False
+
+            def register_defaults(self):
+                pass
+
+            def list_collectors(self):
+                return ["rss"]
+
+            def collect_one(self, *args, **kwargs):
+                self.collected_inline = True
+                raise AssertionError("collect_one should run in background")
+
+            def collect_all(self, *args, **kwargs):
+                self.collected_inline = True
+                raise AssertionError("collect_all should run in background")
+
+        background_tasks = FakeBackgroundTasks()
+
+        with patch("ingestion.Pipeline", return_value=FakePipeline()):
+            response = await api_routes.ingest_trigger(
+                api_routes.IngestTriggerRequest(source="rss", limit=10),
+                background_tasks=background_tasks,
+                current_user=User(),
+            )
+
+        self.assertEqual(response.status, "started")
+        self.assertTrue(response.task_id)
+        self.assertEqual(len(background_tasks.tasks), 1)
+        self.assertEqual(response.articles_collected, 0)

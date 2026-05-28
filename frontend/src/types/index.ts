@@ -57,6 +57,7 @@ export interface Source {
   score: number
   url?: string
   published_at?: number
+  language?: string
 }
 
 // 历史记录类型
@@ -94,7 +95,10 @@ export interface IngestTriggerResponse {
   status: 'started' | 'error' | string
   source: string | null
   message: string
+  task_id?: string | null
   articles_collected: number
+  chunks_indexed?: number
+  records_inserted?: number
 }
 
 // 数据导入状态响应类型
@@ -137,4 +141,20 @@ export interface RefreshRequest {
 export interface RefreshResponse {
   access_token: string
   token_type: string
+}
+
+export interface ResearchTaskResponse {
+  task_id: string
+  status: string
+  message?: string
+  current_step?: string
+  plan?: Record<string, unknown>
+  result_markdown?: string
+  ppt_outline?: {
+    title?: string
+    slides?: Array<{ page: number; title: string; bullets: string[] }>
+  }
+  quality_report?: Record<string, unknown>
+  execution_log?: Array<{ step: string; status: string; tool_call_count?: number }>
+  sources_used?: number
 }

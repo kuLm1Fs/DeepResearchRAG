@@ -1,5 +1,3 @@
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 
@@ -43,6 +41,7 @@ class StatsResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     milvus_connected: bool
+    postgres_connected: bool = False
     llm_provider: str
 
 
@@ -71,13 +70,18 @@ class SSEErrorEvent(BaseModel):
 class IngestTriggerRequest(BaseModel):
     source: str | None = Field(default=None, description="Specific collector name, None for all")
     limit: int | None = Field(default=None, description="Limit number of articles to collect")
+    fetch_full_text: bool = Field(default=True, description="Use trafilatura to fetch full article text")
+    index: bool = Field(default=True, description="Embed and insert collected articles into Milvus")
 
 
 class IngestTriggerResponse(BaseModel):
     status: str
     source: str | None
     message: str
+    task_id: str | None = None
     articles_collected: int = 0
+    chunks_indexed: int = 0
+    records_inserted: int = 0
 
 
 class IngestStatusResponse(BaseModel):

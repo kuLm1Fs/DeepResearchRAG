@@ -1,6 +1,7 @@
 import json
+import uuid
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import PlainTextResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -29,6 +30,7 @@ logger = get_logger(__name__)
 router = APIRouter()
 router.include_router(auth_router)
 router.include_router(research_router)
+ingest_tasks: dict[str, dict] = {}
 
 
 def build_query_filters(request: QueryRequest, current_user) -> dict[str, str]:
@@ -55,6 +57,56 @@ def build_current_user_filters(current_user) -> dict[str, str]:
 
 def build_current_user_expr(current_user) -> str:
     return build_filter_expr(build_current_user_filters(current_user)) or "id >= 0"
+
+
+async def run_ingest_task(
+    task_id: str,
+    request: IngestTriggerRequest,
+    user_id: str,
+    company_id: str,
+) -> None:
+    from ingestion import Pipeline, index_articles
+
+    ingest_tasks[task_id]["status"] = "running"
+    try:
+        pipeline = Pipeline()
+        pipeline.register_defaults()
+
+        if request.source:
+            articles = list(
+                pipeline.collect_one(
+                    request.source,
+                    limit=request.limit,
+                    fetch_full_text=request.fetch_full_text,
+                )
+            )
+        else:
+            articles = list(
+                pipeline.collect_all(
+                    limit=request.limit,
+                    fetch_full_text=request.fetch_full_text,
+                )
+            )
+
+        index_stats = {"chunks": 0, "inserted": 0}
+        if request.index and articles:
+            index_stats = await index_articles(
+                articles,
+                user_id=user_id,
+                company_id=company_id,
+            )
+
+        ingest_tasks[task_id].update({
+            "status": "completed",
+            "articles_collected": len(articles),
+            "chunks_indexed": index_stats.get("chunks", 0),
+            "records_inserted": index_stats.get("inserted", 0),
+        })
+        logger.info("ingestion_completed", task_id=task_id, source=request.source, articles=len(articles))
+    except Exception as e:
+        ingest_tasks[task_id].update({"status": "failed", "error": str(e)})
+        metrics_registry.increment("rag_ingest_trigger_errors_total")
+        logger.error("ingest_task_failed", task_id=task_id, source=request.source, error=str(e))
 
 
 @router.post("/query")
@@ -217,13 +269,17 @@ async def readyz():
 
 
 @router.post("/ingest/trigger", response_model=IngestTriggerResponse)
-async def ingest_trigger(request: IngestTriggerRequest, current_user=Depends(get_current_user)):
+async def ingest_trigger(
+    request: IngestTriggerRequest,
+    background_tasks: BackgroundTasks,
+    current_user=Depends(get_current_user),
+):
     """
     Trigger data ingestion from specified source or all sources.
 
     This is an async trigger - collection happens in background.
     """
-    from ingestion import Pipeline, index_articles
+    from ingestion import Pipeline
 
     try:
         metrics_registry.increment("rag_ingest_trigger_requests_total")
@@ -231,49 +287,39 @@ async def ingest_trigger(request: IngestTriggerRequest, current_user=Depends(get
         pipeline.register_defaults()
 
         collector_name = request.source
-        articles_collected = 0
 
         if collector_name:
-            # Trigger specific collector
             if collector_name not in pipeline.list_collectors():
                 return IngestTriggerResponse(
                     status="error",
                     source=collector_name,
                     message=f"Collector '{collector_name}' not found",
                 )
-            articles = list(
-                pipeline.collect_one(
-                    collector_name,
-                    limit=request.limit,
-                    fetch_full_text=request.fetch_full_text,
-                )
-            )
-        else:
-            # Trigger all collectors
-            articles = list(
-                pipeline.collect_all(
-                    limit=request.limit,
-                    fetch_full_text=request.fetch_full_text,
-                )
-            )
 
-        articles_collected = len(articles)
-        index_stats = {"chunks": 0, "inserted": 0}
-        if request.index and articles:
-            index_stats = await index_articles(
-                articles,
-                user_id=getattr(current_user, "id", "") or "",
-                company_id=getattr(current_user, "company_id", "") or "",
-            )
-        logger.info("ingestion_completed", source=collector_name, articles=articles_collected)
+        task_id = f"ingest_{uuid.uuid4().hex[:12]}"
+        ingest_tasks[task_id] = {
+            "status": "pending",
+            "source": collector_name,
+            "user_id": getattr(current_user, "id", "") or "",
+            "company_id": getattr(current_user, "company_id", "") or "",
+            "articles_collected": 0,
+            "chunks_indexed": 0,
+            "records_inserted": 0,
+        }
+        background_tasks.add_task(
+            run_ingest_task,
+            task_id,
+            request,
+            ingest_tasks[task_id]["user_id"],
+            ingest_tasks[task_id]["company_id"],
+        )
+        logger.info("ingestion_task_enqueued", task_id=task_id, source=collector_name)
 
         return IngestTriggerResponse(
             status="started",
             source=collector_name,
-            message=f"Collected {articles_collected} articles and indexed {index_stats.get('inserted', 0)} chunks",
-            articles_collected=articles_collected,
-            chunks_indexed=index_stats.get("chunks", 0),
-            records_inserted=index_stats.get("inserted", 0),
+            message=f"Ingestion task {task_id} started",
+            task_id=task_id,
         )
     except Exception as e:
         logger.error("ingest_trigger_failed", error=str(e))
