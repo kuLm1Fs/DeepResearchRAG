@@ -1,6 +1,7 @@
 import json
 import re
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from core import get_logger
 
@@ -380,8 +381,9 @@ async def retrieve(state: dict) -> dict:
     queries = search_plan.get("queries", [state.get("query", "")])
     per_query = search_plan.get("per_query", 3)
     total = search_plan.get("total", state.get("top_k", 5))
+    filters = state.get("filters") or None
 
-    logger.info("retrieving", num_queries=len(queries), per_query=per_query, total=total)
+    logger.info("retrieving", num_queries=len(queries), per_query=per_query, total=total, filters=filters)
 
     retriever = get_retriever(state)
 
@@ -389,7 +391,10 @@ async def retrieve(state: dict) -> dict:
     seen_titles = set()
 
     for q in queries:
-        results = await retriever.retrieve(q, top_k=per_query)
+        if filters:
+            results = await retriever.retrieve(q, top_k=per_query, filters=filters)
+        else:
+            results = await retriever.retrieve(q, top_k=per_query)
         for r in results:
             title = r.get("title", "")
             if title not in seen_titles:
@@ -482,7 +487,11 @@ async def re_search(state: dict) -> dict:
 
     retriever = get_retriever(state)
 
-    new_results = await retriever.retrieve(re_search_query, top_k=5)
+    new_results = await retriever.retrieve(
+        re_search_query,
+        top_k=5,
+        filters=state.get("filters") or None,
+    )
 
     # 合并去重
     existing = {r.get("title") for r in state.get("retrieval_results", [])}
@@ -534,7 +543,6 @@ async def generate_answer(state: dict) -> dict:
 async def self_reflect(state: dict) -> dict:
     """深度反思：检查答案质量、来源覆盖、是否需要补充。"""
     answer = state.get("answer", "")
-    query = state.get("query", "")
     results = state.get("retrieval_results", [])
     sources = state.get("sources", [])
 

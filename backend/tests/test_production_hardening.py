@@ -163,6 +163,31 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_retriever.filters, {"company_id": "comp_123"})
         self.assertEqual(result["retrieval_results"][0]["title"], "Tenant result")
 
+    async def test_agent_re_search_passes_tenant_filters_to_retriever(self):
+        class FakeRetriever:
+            def __init__(self):
+                self.filters = None
+
+            async def retrieve(self, query, top_k, filters=None):
+                self.filters = filters
+                return [{"title": "Tenant follow-up", "content": "more evidence", "score": 0.8}]
+
+        fake_retriever = FakeRetriever()
+        runtime = type("Runtime", (), {
+            "create_retriever": lambda self: fake_retriever,
+        })()
+
+        result = await nodes.re_search({
+            "runtime": runtime,
+            "retrieval_evaluation": {"re_search_query": "tenant follow-up"},
+            "retrieval_results": [],
+            "filters": {"company_id": "comp_123", "user_id": "user_456"},
+            "top_k": 1,
+        })
+
+        self.assertEqual(fake_retriever.filters, {"company_id": "comp_123", "user_id": "user_456"})
+        self.assertEqual(result["retrieval_results"][0]["title"], "Tenant follow-up")
+
     def test_initial_state_carries_filters(self):
         state = agent_graph.build_initial_state(
             "tenant query",
