@@ -15,6 +15,9 @@ COPY src/ ./src/
 COPY gunicorn.conf.py ./
 COPY migrations/ ./migrations/
 
+# Ensure readable permissions (some files/dirs may have restrictive perms from host)
+RUN chmod -R a+rX /app/src
+
 # ---- Runtime stage ----
 FROM python:3.11-slim AS runtime
 
