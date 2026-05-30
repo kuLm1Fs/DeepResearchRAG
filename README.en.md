@@ -286,4 +286,4 @@ LLM response cache lives in `backend/data/llm_cache/{version}/`. Cache keys incl
 
 ## License
 
-Add a LICENSE file before publishing this project as open source.
+[MIT License](LICENSE)
