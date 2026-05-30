@@ -23,8 +23,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_companies_name ON companies(name);
 CREATE OR REPLACE FUNCTION reset_monthly_quota()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF EXTRACT(MONTH FROM CURRENT_DATE) != EXTRACT(MONTH FROM quota_reset_at)
-       OR EXTRACT(YEAR FROM CURRENT_DATE) != EXTRACT(YEAR FROM quota_reset_at) THEN
+    IF EXTRACT(MONTH FROM CURRENT_DATE) != EXTRACT(MONTH FROM NEW.quota_reset_at)
+       OR EXTRACT(YEAR FROM CURRENT_DATE) != EXTRACT(YEAR FROM NEW.quota_reset_at) THEN
         NEW.quota_used = 0;
         NEW.quota_reset_at = CURRENT_DATE;
     END IF;
@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     action VARCHAR(64) NOT NULL,   -- login / query / research / export
     resource_type VARCHAR(64),
     resource_id VARCHAR(64),
-    ip_address INET,
+    ip_address VARCHAR(48),
     user_agent TEXT,
     details JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

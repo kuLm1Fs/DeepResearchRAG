@@ -75,8 +75,8 @@ async def aplanner(query: str, user_id: str | None = None) -> dict[str, Any]:
     try:
         return await _async_llm_planner(query)
     except Exception as e:
-        logger.error("planner LLM call failed", error=str(e))
-        return _error_result(str(e))
+        logger.error("planner LLM call failed, using stub", error=str(e))
+        return _stub_planner(query)
 
 
 async def _async_llm_planner(query: str) -> dict[str, Any]:
@@ -138,7 +138,7 @@ def _stub_planner(query: str) -> dict[str, Any]:
 
 
 def _error_result(error: str) -> dict[str, Any]:
-    return _make_tool_result(str(uuid.uuid4())[:8], None, status="error", errors=[error], gaps=["planner 调用失败"])
+    return _make_tool_result(str(uuid.uuid4())[:8], {}, status="error", errors=[error], gaps=["planner 调用失败"])
 
 
 def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = None) -> dict[str, Any]:
@@ -297,8 +297,8 @@ async def aanalyst(evidence: list[dict], focus: str = "all") -> dict[str, Any]:
     try:
         return await _async_analyst(evidence, focus)
     except Exception as e:
-        logger.error("analyst LLM call failed", error=str(e))
-        return _error_analyst(str(e))
+        logger.error("analyst LLM call failed, using stub", error=str(e))
+        return _stub_analyst(focus)
 
 
 async def _async_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
@@ -362,7 +362,7 @@ def _stub_analyst(focus: str) -> dict[str, Any]:
 
 
 def _error_analyst(error: str) -> dict[str, Any]:
-    return _make_tool_result(str(uuid.uuid4())[:8], None, status="error", errors=[error], gaps=["analyst 调用失败"])
+    return _make_tool_result(str(uuid.uuid4())[:8], {}, status="error", errors=[error], gaps=["analyst 调用失败"])
 
 
 def checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
@@ -418,8 +418,8 @@ async def achecker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
     try:
         return await _async_checker(claims, evidence)
     except Exception as e:
-        logger.error("checker LLM call failed", error=str(e))
-        return _error_checker(str(e))
+        logger.error("checker LLM call failed, using stub", error=str(e))
+        return _stub_checker(claims, evidence)
 
 
 async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
@@ -487,7 +487,7 @@ def _stub_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
 
 
 def _error_checker(error: str) -> dict[str, Any]:
-    return _make_tool_result(str(uuid.uuid4())[:8], None, status="error", errors=[error], gaps=["checker 调用失败"])
+    return _make_tool_result(str(uuid.uuid4())[:8], {}, status="error", errors=[error], gaps=["checker 调用失败"])
 
 
 def writer(analysis: dict, check_result: dict | None, output_format: str = "both") -> dict[str, Any]:
@@ -527,8 +527,8 @@ async def awriter(
     try:
         return await _async_writer(analysis, check_result, output_format)
     except Exception as e:
-        logger.error("writer LLM call failed", error=str(e))
-        return _error_writer(str(e))
+        logger.error("writer LLM call failed, using stub", error=str(e))
+        return _stub_writer(analysis, check_result)
 
 
 async def _build_ppt_content(
@@ -926,4 +926,4 @@ def _stub_writer(analysis: dict, check_result: dict | None) -> dict[str, Any]:
 
 
 def _error_writer(error: str) -> dict[str, Any]:
-    return _make_tool_result(str(uuid.uuid4())[:8], None, status="error", errors=[error], gaps=["writer 调用失败"])
+    return _make_tool_result(str(uuid.uuid4())[:8], {}, status="error", errors=[error], gaps=["writer 调用失败"])
