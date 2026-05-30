@@ -2,12 +2,28 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
-from core import configure_logging, get_logger, TraceIDMiddleware, settings, setup_langsmith
-from src.core.errors import RAGError
-from .routes import router
+from core import (
+    RequestBodySizeMiddleware,
+    SecurityHeadersMiddleware,
+    TraceIDMiddleware,
+    configure_logging,
+    get_logger,
+    settings,
+    setup_langsmith,
+)
 
 logger = get_logger(__name__)
+
+# Rate limiter instance — imported by endpoint modules for @limiter.limit()
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[settings.rate_limit_default] if settings.rate_limit_enabled else [],
+    enabled=settings.rate_limit_enabled,
+)
 
 
 @asynccontextmanager
@@ -18,10 +34,10 @@ async def lifespan(app: FastAPI):
     setup_langsmith()
 
     # 生产环境验证
-    if not settings.debug:
+    if settings.is_prod:
         logger.info("生产模式启动")
         # 验证 LLM 缓存已关闭
-        if settings.LLM_CACHE_ENABLED:
+        if settings.llm_cache_enabled:
             logger.warning("生产环境 LLM_CACHE_ENABLED 应为 False，建议在 .env.prod 中设置")
 
     yield
@@ -37,17 +53,37 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Add middleware
+    # Rate limiter
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+    # Middleware registration (Starlette executes in reverse order)
+    # Request flow: RequestBodySize → CORS → SecurityHeaders → TraceID → Route Handler
     app.add_middleware(TraceIDMiddleware)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],  # In production, restrict to frontend origin
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    if settings.is_prod:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origin_list,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-Trace-ID"],
+        )
+    else:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origin_list,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+    app.add_middleware(RequestBodySizeMiddleware)
 
     # Add routes
+    from .routes import router
+
     app.include_router(router, prefix="/api")
 
     @app.get("/")

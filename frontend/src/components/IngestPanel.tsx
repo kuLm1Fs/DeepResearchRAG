@@ -1,15 +1,19 @@
-import { useState, useEffect } from 'react'
-import { ingestTrigger, getIngestStatus } from '../api/client'
-import type { IngestStatusResponse, IngestTriggerResponse } from '../types'
+import { useState, useEffect } from 'react';
+import { ingestTrigger, getIngestStatus } from '../api/client';
+import type { IngestStatusResponse, IngestTriggerResponse } from '../types';
 
 const DATA_SOURCES = [
-  { value: '', label: '全部 (All)' },
+  { value: '', label: 'All' },
   { value: 'rss', label: 'RSS' },
-  { value: 'hackernews', label: 'HackerNews' },
-  { value: 'huggingface', label: 'HuggingFace' },
-]
+  { value: 'hackernews', label: 'HN' },
+  { value: 'huggingface', label: 'HF' },
+];
 
-export default function IngestPanel() {
+interface IngestPanelProps {
+  compact?: boolean;
+}
+
+export default function IngestPanel({ compact = false }: IngestPanelProps) {
   const [source, setSource] = useState('')
   const [limit, setLimit] = useState(1000)
   const [loading, setLoading] = useState(false)
@@ -22,7 +26,7 @@ export default function IngestPanel() {
         const data = await getIngestStatus()
         setStatus(data)
       } catch {
-        // Silently fail for status check
+        // Silently fail
       }
     }
     fetchStatus()
@@ -36,11 +40,11 @@ export default function IngestPanel() {
     try {
       const result: IngestTriggerResponse = await ingestTrigger(source || undefined, normalizedLimit)
       if (result.status !== 'error') {
-        setMessage({ type: 'success', text: result.message || `已采集: ${result.articles_collected} 条` })
+        setMessage({ type: 'success', text: result.message || `Collected: ${result.articles_collected}` })
         const data = await getIngestStatus()
         setStatus(data)
       } else {
-        setMessage({ type: 'error', text: result.message || '导入失败' })
+        setMessage({ type: 'error', text: result.message || 'Import failed' })
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error'
@@ -50,10 +54,42 @@ export default function IngestPanel() {
     }
   }
 
+  if (compact) {
+    return (
+      <div className="ingest-panel">
+        <div className="ingest-row">
+          <select
+            value={source}
+            onChange={e => setSource(e.target.value)}
+            className="ingest-select"
+          >
+            {DATA_SOURCES.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleTrigger}
+            disabled={loading}
+            className="ingest-button"
+          >
+            {loading ? '...' : 'Import'}
+          </button>
+        </div>
+        {message && (
+          <div className={`ingest-message ${message.type}`}>{message.text}</div>
+        )}
+        {status && (
+          <div className="ingest-stats">
+            {status.total_articles} articles
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 border-b border-gray-200 bg-gray-50">
       <div className="text-sm font-medium text-gray-700 mb-3">数据导入</div>
-
       <div className="flex flex-col gap-3">
         <div className="flex gap-2">
           <select
@@ -75,7 +111,6 @@ export default function IngestPanel() {
             className="w-24 px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
-
         <button
           onClick={handleTrigger}
           disabled={loading}
@@ -83,17 +118,11 @@ export default function IngestPanel() {
         >
           {loading ? '导入中...' : '导入数据'}
         </button>
-
         {message && (
-          <div
-            className={`text-xs px-2 py-1.5 rounded ${
-              message.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-            }`}
-          >
+          <div className={`text-xs px-2 py-1.5 rounded ${message.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
             {message.text}
           </div>
         )}
-
         {status && (
           <div className="text-xs text-gray-500 mt-1">
             当前数据量: {status.total_articles} 条
@@ -106,5 +135,5 @@ export default function IngestPanel() {
         )}
       </div>
     </div>
-  )
+  );
 }

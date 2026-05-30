@@ -4,13 +4,14 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header, Request
 from sqlalchemy import select
 
 from ..auth import hash_password, verify_password, create_access_token, create_refresh_token, decode_access_token
+from ..core import get_logger, settings, write_audit_log
 from ..db import get_db_session
 from ..db.models import Company, User, RefreshToken
-from ..core import get_logger
+from .app import limiter
 from .models import (
     RegisterRequest,
     RegisterResponse,
@@ -37,6 +38,23 @@ def hash_token(token: str) -> str:
 def verify_token(token: str, hashed: str) -> bool:
     """Verify a token against its SHA256 hash."""
     return hashlib.sha256(token.encode()).hexdigest() == hashed
+
+
+def select_valid_refresh_token(
+    requested_token: str,
+    tokens,
+    now: datetime | None = None,
+):
+    """Return the stored refresh token row that exactly matches the client token."""
+    now = now or datetime.utcnow()
+    for token in tokens:
+        if token.revoked:
+            continue
+        if token.expires_at <= now:
+            continue
+        if verify_token(requested_token, token.token_hash):
+            return token
+    return None
 
 
 def _generate_id(prefix: str) -> str:
@@ -82,7 +100,8 @@ async def get_current_user(authorization: Annotated[str | None, Header()] = None
 
 # --- 注册 ---
 @router.post("/register", response_model=RegisterResponse, status_code=201)
-async def register(req: RegisterRequest):
+@limiter.limit(settings.rate_limit_auth)
+async def register(req: RegisterRequest, request: Request, background_tasks: BackgroundTasks):
     """
     用户注册：
     1. 检查邮箱是否已存在
@@ -140,6 +159,18 @@ async def register(req: RegisterRequest):
 
         logger.info("user_registered", user_id=user_id, email=req.email)
 
+        background_tasks.add_task(
+            write_audit_log,
+            action="user.register",
+            user_id=user_id,
+            company_id=company_id,
+            resource_type="user",
+            resource_id=user_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            details={"email": req.email},
+        )
+
         return RegisterResponse(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -149,7 +180,8 @@ async def register(req: RegisterRequest):
 
 # --- 登录 ---
 @router.post("/login", response_model=LoginResponse)
-async def login(req: LoginRequest):
+@limiter.limit(settings.rate_limit_auth)
+async def login(req: LoginRequest, request: Request, background_tasks: BackgroundTasks):
     """
     用户登录：
     1. 根据 email 查找用户
@@ -191,6 +223,17 @@ async def login(req: LoginRequest):
 
         logger.info("user_logged_in", user_id=user.id, email=req.email)
 
+        background_tasks.add_task(
+            write_audit_log,
+            action="user.login",
+            user_id=user.id,
+            company_id=user.company_id,
+            resource_type="user",
+            resource_id=user.id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+
         return LoginResponse(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -200,7 +243,8 @@ async def login(req: LoginRequest):
 
 # --- Token 刷新 ---
 @router.post("/refresh", response_model=RefreshResponse)
-async def refresh_token(req: RefreshRequest):
+@limiter.limit(settings.rate_limit_auth)
+async def refresh_token(req: RefreshRequest, request: Request, background_tasks: BackgroundTasks):
     """
     用 refresh_token 换新的 access_token：
     1. 解码 refresh_token
@@ -232,11 +276,12 @@ async def refresh_token(req: RefreshRequest):
         if not tokens:
             raise HTTPException(status_code=401, detail="refresh_token 已失效")
 
-        # 简单策略：找到最后一个（应该每个 token 只用一次）
-        latest_token = tokens[0]
+        matching_token = select_valid_refresh_token(req.refresh_token, tokens)
+        if not matching_token:
+            raise HTTPException(status_code=401, detail="refresh_token 已失效")
 
         # 撤销旧 token
-        latest_token.revoked = True
+        matching_token.revoked = True
 
         # 获取用户公司信息
         stmt = select(User).where(User.id == user_id)
@@ -249,5 +294,13 @@ async def refresh_token(req: RefreshRequest):
         new_access_token = create_access_token({"sub": user_id, "company_id": user.company_id})
 
         logger.info("token_refreshed", user_id=user_id)
+
+        background_tasks.add_task(
+            write_audit_log,
+            action="token.refresh",
+            user_id=user_id,
+            resource_type="token",
+            ip_address=request.client.host if request.client else None,
+        )
 
         return RefreshResponse(access_token=new_access_token)

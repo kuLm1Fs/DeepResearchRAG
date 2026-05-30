@@ -4,6 +4,7 @@ from .rss_collector import RSSCollector, RSS_SOURCES
 from .hn_collector import HNCollector
 from .dataset_collector import DatasetCollector, DATASET_CONFIGS
 from .pipeline import IngestionPipeline, Pipeline
+from .indexer import index_articles
 
 __all__ = [
     "BaseCollector",
@@ -14,4 +15,5 @@ __all__ = [
     "DATASET_CONFIGS",
     "Pipeline",
     "IngestionPipeline",
+    "index_articles",
 ]

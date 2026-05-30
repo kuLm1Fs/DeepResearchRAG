@@ -3,7 +3,7 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any
 
-from core import get_logger
+from core import get_logger, LLMError
 
 from .runtime import AgentRuntime
 from .schemas import QueryAnalysis, RetrievalEvaluation
@@ -535,7 +535,7 @@ async def generate_answer(state: dict) -> dict:
         answer = await llm.chat(messages)
     except Exception as e:
         logger.error("answer_generation_failed", error=str(e))
-        return {"answer": f"Failed to generate answer: {e}", "sources": sources}
+        return {"answer": "抱歉，生成回答时出现错误，请重试", "sources": sources}
 
     return {"answer": answer, "sources": sources}
 
@@ -654,4 +654,4 @@ async def generate_answer_stream(state: dict) -> AsyncIterator[str]:
             yield token
     except Exception as e:
         logger.error("stream_answer_generation_failed", error=str(e))
-        yield f"\n\n[Error: {e}]"
+        yield "\n\n[生成中断，请重试]"

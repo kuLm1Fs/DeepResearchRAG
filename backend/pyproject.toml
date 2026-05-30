@@ -43,6 +43,12 @@ dependencies = [
     "PyJWT>=2.8.0",
     "bcrypt>=4.1.0",
 
+    # Security & rate limiting
+    "slowapi>=0.1.9",
+
+    # Production server
+    "gunicorn>=22.0.0",
+
     # Async PostgreSQL
     "asyncpg>=0.29.0",
     "greenlet>=3.0.0",

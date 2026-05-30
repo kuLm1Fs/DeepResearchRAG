@@ -4,7 +4,7 @@
 import asyncio
 import structlog
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Iterator
+from typing import Any, Iterator
 
 from .base import BaseCollector
 
@@ -175,23 +175,6 @@ class Pipeline:
         except Exception as e:
             logger.error("[Pipeline] 采集器运行异常", collector=collector.name, error=str(e))
             return []
-
-    def collect_with_callback(
-        self, callback: Callable[[dict[str, Any]], None], parallel: bool = True, **kwargs
-    ) -> None:
-        """
-        触发所有采集器，并对每条结果调用回调函数
-
-        Args:
-            callback: 回调函数，接收文章字典作为参数
-            parallel: 是否并行执行
-            **kwargs: 传递给采集器的参数
-        """
-        for article in self.collect_all(parallel=parallel, **kwargs):
-            try:
-                callback(article)
-            except Exception as e:
-                logger.error("[Pipeline] 回调处理失败", error=str(e), article_title=article.get("title", ""))
 
     async def collect_all_async(self, **kwargs) -> Iterator[dict[str, Any]]:
         """

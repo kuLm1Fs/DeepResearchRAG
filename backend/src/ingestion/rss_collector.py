@@ -8,12 +8,6 @@ from typing import Any, Iterator
 
 import feedparser
 import structlog
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-)
 
 from .base import BaseCollector
 
@@ -64,20 +58,6 @@ class RSSCollector(BaseCollector):
         self.sources = sources or RSS_SOURCES
 
     @staticmethod
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(Exception),
-        reraise=True,
-    )
-    def _fetch_feed(url: str) -> feedparser.FeedParserDict:
-        """获取并解析 RSS 源（带重试）"""
-        logger.debug("[RSSCollector] 正在获取订阅源", url=url)
-        feed = feedparser.parse(url)
-        if feed.bozo and not feed.entries:
-            raise RuntimeError(f"无法解析 RSS 源: {url}")
-        return feed
-
     def _fetch_feed_with_retry(url: str) -> feedparser.FeedParserDict:
         """获取并解析 RSS 源（带重试和多次尝试）"""
         logger.debug("[RSSCollector] 正在获取订阅源", url=url)
@@ -229,14 +209,17 @@ class RSSCollector(BaseCollector):
             logger.info("[RSSCollector] 开始采集订阅源", source=source_name, url=url)
 
             try:
-                feed = self._fetch_feed(url)
-
                 entry_count = 0
-                for entry in feed.entries or []:
-                    article = self._parse_entry(entry, source_name, language, category, fetch_full_text)
-                    if article:
-                        yield article
-                        entry_count += 1
+                for article in self.collect_from_source(
+                    url=url,
+                    source_name=source_name,
+                    language=language,
+                    category=category,
+                    fetch_full_text=fetch_full_text,
+                    limit=kwargs.get("limit"),
+                ):
+                    yield article
+                    entry_count += 1
 
                 logger.info("[RSSCollector] 订阅源采集完成", source=source_name, count=entry_count)
 
@@ -251,6 +234,7 @@ class RSSCollector(BaseCollector):
         language: str = "en",
         category: str = "news",
         fetch_full_text: bool = False,
+        limit: int | None = None,
     ) -> Iterator[dict[str, Any]]:
         """
         从指定 RSS 源采集（临时单源）
@@ -268,9 +252,11 @@ class RSSCollector(BaseCollector):
         logger.info("[RSSCollector] 采集指定订阅源", source=source_name, url=url)
 
         try:
-            feed = self._fetch_feed(url)
+            feed = self._fetch_feed_with_retry(url)
 
-            for entry in feed.entries or []:
+            for index, entry in enumerate(feed.entries or []):
+                if limit is not None and index >= limit:
+                    break
                 article = self._parse_entry(entry, source_name, language, category, fetch_full_text)
                 if article:
                     yield article

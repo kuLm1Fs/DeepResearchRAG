@@ -14,6 +14,7 @@ export default function HealthBadge({ className = '' }: HealthBadgeProps) {
     let mounted = true
 
     const checkHealth = async () => {
+      if (document.visibilityState === 'hidden') return
       try {
         const data = await healthCheck()
         if (mounted) {
@@ -36,15 +37,20 @@ export default function HealthBadge({ className = '' }: HealthBadgeProps) {
 
     checkHealth()
     const interval = setInterval(checkHealth, 30000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') checkHealth()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       mounted = false
       clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
 
-  const getStatusColor = () => {
-    if (loading || !health) return 'bg-gray-400'
-    return health.status === 'healthy' ? 'bg-green-500' : 'bg-red-500'
+  const getStatusClass = () => {
+    if (loading || !health) return ''
+    return health.status === 'healthy' ? 'healthy' : health.status === 'degraded' ? 'degraded' : 'unhealthy'
   }
 
   const getStatusText = () => {
@@ -53,26 +59,10 @@ export default function HealthBadge({ className = '' }: HealthBadgeProps) {
     return health.status === 'healthy' ? 'Healthy' : 'Unhealthy'
   }
 
-  const tooltipContent = health ? (
-    <div className="text-left">
-      <div>Milvus: {health.milvus_connected ? 'Connected' : 'Disconnected'}</div>
-      <div>LLM: {health.llm_provider}</div>
-    </div>
-  ) : null
-
   return (
-    <div className={`group relative inline-block ${className}`}>
-      <div
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium text-white ${getStatusColor()}`}
-      >
-        <span className="w-2 h-2 rounded-full bg-white opacity-80" />
-        {getStatusText()}
-      </div>
-      {tooltipContent && (
-        <div className="absolute top-full left-0 mt-1 hidden group-hover:block z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-xs text-gray-700 whitespace-nowrap">
-          {tooltipContent}
-        </div>
-      )}
+    <div className={`health-badge ${className}`}>
+      <span className={`health-dot ${getStatusClass()}`}></span>
+      {getStatusText()}
     </div>
   )
 }

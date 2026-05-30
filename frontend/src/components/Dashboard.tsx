@@ -1,13 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getStats } from '../api/client';
-
-interface StatsData {
-  totalArticles: number;
-  totalChunks: number;
-  sources: string[];
-  categories: string[];
-  lastUpdated: string | null;
-}
+import type { StatsData } from '../types';
 
 interface DashboardProps {
   compact?: boolean;
@@ -21,10 +14,18 @@ export function Dashboard({ compact = false }: DashboardProps) {
   useEffect(() => {
     fetchStats();
     const interval = setInterval(fetchStats, 30000);
-    return () => clearInterval(interval);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') fetchStats();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   const fetchStats = async () => {
+    if (document.visibilityState === 'hidden') return;
     try {
       const data = await getStats();
       setStats({

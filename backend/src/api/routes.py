@@ -6,12 +6,13 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
-from core import get_logger, settings
+from core import get_logger, settings, write_audit_log, RAGError
 from core.metrics import metrics_registry
 from db import Company, check_connection, get_db_session
 from retrieval.retriever import build_filter_expr
 from vectorstore import MilvusStore
 
+from .app import limiter
 from .auth import get_current_user
 from .auth import router as auth_router
 from .models import (
@@ -129,33 +130,45 @@ async def run_ingest_task(
 
 
 @router.post("/query")
-async def query(request: QueryRequest, req: Request, current_user=Depends(get_current_user)):
+@limiter.limit(settings.rate_limit_query)
+async def query(body: QueryRequest, request: Request, background_tasks: BackgroundTasks, current_user=Depends(get_current_user)):
     """
     Query endpoint with SSE streaming support.
 
     Returns sources first, then streams the answer token by token.
     """
-    trace_id = req.state.trace_id
+    trace_id = request.state.trace_id
     metrics_registry.increment("rag_query_requests_total")
-    filters = build_query_filters(request, current_user)
+    filters = build_query_filters(body, current_user)
 
     logger.info("query_request_received",
         trace_id=trace_id,
-        query=request.query,
-        top_k=request.top_k,
-        stream=request.stream,
+        query=body.query,
+        top_k=body.top_k,
+        stream=body.stream,
     )
 
-    if request.stream:
+    background_tasks.add_task(
+        write_audit_log,
+        action="query.execute",
+        user_id=current_user.id,
+        company_id=current_user.company_id,
+        resource_type="query",
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        details={"query": body.query, "top_k": body.top_k, "stream": body.stream},
+    )
+
+    if body.stream:
         # 流式路径：真正的 token 流
         from agent.graph import run_agent_stream
 
         async def stream_generator():
             try:
                 async for event in run_agent_stream(
-                    query=request.query,
+                    query=body.query,
                     trace_id=trace_id,
-                    top_k=request.top_k,
+                    top_k=body.top_k,
                     filters=filters,
                 ):
                     event_type = event["type"]
@@ -177,9 +190,9 @@ async def query(request: QueryRequest, req: Request, current_user=Depends(get_cu
         from agent import run_agent
 
         result = await run_agent(
-            query=request.query,
+            query=body.query,
             trace_id=trace_id,
-            top_k=request.top_k,
+            top_k=body.top_k,
             filters=filters,
         )
 
@@ -238,6 +251,10 @@ async def get_stats(current_user=Depends(get_current_user)):
             categories=categories,
             languages=languages,
         )
+    except RAGError as e:
+        logger.error("stats_failed", error=str(e))
+        metrics_registry.increment("rag_stats_errors_total")
+        raise HTTPException(status_code=503, detail="Stats service unavailable") from e
     except Exception as e:
         logger.error("stats_failed", error=str(e))
         metrics_registry.increment("rag_stats_errors_total")
@@ -283,8 +300,10 @@ async def readyz():
 
 
 @router.post("/ingest/trigger", response_model=IngestTriggerResponse)
+@limiter.limit(settings.rate_limit_ingest)
 async def ingest_trigger(
-    request: IngestTriggerRequest,
+    body: IngestTriggerRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
     current_user=Depends(get_current_user),
 ):
@@ -300,7 +319,7 @@ async def ingest_trigger(
         pipeline = Pipeline()
         pipeline.register_defaults()
 
-        collector_name = request.source
+        collector_name = body.source
 
         if collector_name:
             if collector_name not in pipeline.list_collectors():
@@ -331,11 +350,23 @@ async def ingest_trigger(
         background_tasks.add_task(
             run_ingest_task,
             task_id,
-            request,
+            body,
             ingest_tasks[task_id]["user_id"],
             ingest_tasks[task_id]["company_id"],
         )
         logger.info("ingestion_task_enqueued", task_id=task_id, source=collector_name)
+
+        background_tasks.add_task(
+            write_audit_log,
+            action="ingest.trigger",
+            user_id=current_user.id,
+            company_id=current_user.company_id,
+            resource_type="ingest",
+            resource_id=task_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            details={"source": collector_name},
+        )
 
         return IngestTriggerResponse(
             status="started",
@@ -348,8 +379,8 @@ async def ingest_trigger(
         metrics_registry.increment("rag_ingest_trigger_errors_total")
         return IngestTriggerResponse(
             status="error",
-            source=request.source,
-            message=f"Ingestion failed: {e}",
+            source=body.source,
+            message="数据采集失败",
         )
 
 
@@ -380,6 +411,10 @@ async def ingest_status(current_user=Depends(get_current_user)):
             sources=sources,
             collectors=pipeline.list_collectors(),
         )
+    except RAGError as e:
+        logger.error("ingest_status_failed", error=str(e))
+        metrics_registry.increment("rag_ingest_status_errors_total")
+        raise HTTPException(status_code=503, detail="Ingest status service unavailable") from e
     except Exception as e:
         logger.error("ingest_status_failed", error=str(e))
         metrics_registry.increment("rag_ingest_status_errors_total")

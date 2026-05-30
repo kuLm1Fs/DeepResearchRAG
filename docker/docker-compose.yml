@@ -72,6 +72,38 @@ services:
       timeout: 5s
       retries: 3
 
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    environment:
+      - ENV=prod
+      - MILVUS_HOST=milvus-standalone
+      - MILVUS_PORT=19530
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=rag_news
+      - POSTGRES_USER=rag_user
+      - POSTGRES_PASSWORD=rag_secure_password
+    env_file:
+      - ../configs/.env.prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      milvus-standalone:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
 volumes:
   etcd_data:
   minio_data:

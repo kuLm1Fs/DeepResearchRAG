@@ -1,7 +1,6 @@
 """5个 Tool Function 实现（Stub）"""
 import asyncio
 import uuid
-from datetime import datetime
 from typing import Any
 
 from core import settings, get_logger
@@ -9,6 +8,35 @@ from core import settings, get_logger
 from .nodes import parse_json_object
 
 logger = get_logger(__name__)
+
+
+def _create_research_llm():
+    """统一 LLM 实例化（供各 tool 的 _async_* 函数调用）"""
+    from llm import create_llm
+
+    return create_llm(
+        provider=settings.llm_provider,
+        api_key=getattr(settings, f"{settings.llm_provider}_api_key", ""),
+        model=settings.llm_model,
+    )
+
+
+def _make_tool_result(
+    task_id: str,
+    data: dict | None,
+    *,
+    status: str = "success",
+    errors: list[str] | None = None,
+    gaps: list[str] | None = None,
+) -> dict[str, Any]:
+    """统一 tool 返回格式"""
+    return {
+        "task_id": task_id,
+        "status": status,
+        "data": data,
+        "errors": errors or [],
+        "gaps": gaps or [],
+    }
 
 
 def planner(query: str, user_id: str | None = None) -> dict[str, Any]:
@@ -51,20 +79,9 @@ async def aplanner(query: str, user_id: str | None = None) -> dict[str, Any]:
         return _error_result(str(e))
 
 
-def _call_llm_planner(query: str) -> dict[str, Any]:
-    """调用 LLM 生成研究计划（同步包装）"""
-    return asyncio.run(_async_llm_planner(query))
-
-
 async def _async_llm_planner(query: str) -> dict[str, Any]:
     """调用 LLM 生成研究计划（async）"""
-    from llm import create_llm
-
-    llm = create_llm(
-        provider=settings.llm_provider,
-        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
-        model=settings.llm_model
-    )
+    llm = _create_research_llm()
     messages = [
         {
             "role": "system",
@@ -97,13 +114,7 @@ async def _async_llm_planner(query: str) -> dict[str, Any]:
     # 解析 JSON
     try:
         data = parse_json_object(response)
-        return {
-            "task_id": str(uuid.uuid4())[:8],
-            "status": "success",
-            "data": data,
-            "errors": [],
-            "gaps": []
-        }
+        return _make_tool_result(str(uuid.uuid4())[:8], data)
     except ValueError as e:
         logger.warning("planner JSON parse failed", error=str(e), response=response[:200])
         # Fallback: 返回一个基础计划
@@ -112,30 +123,22 @@ async def _async_llm_planner(query: str) -> dict[str, Any]:
 
 def _stub_planner(query: str) -> dict[str, Any]:
     """无 LLM 时的 Stub 返回"""
-    return {
-        "task_id": str(uuid.uuid4())[:8],
-        "status": "success",
-        "data": {
+    return _make_tool_result(
+        str(uuid.uuid4())[:8],
+        {
             "goals": [f"分析 {query} 相关趋势", "识别机会与风险"],
             "audience": "AI 行业从业者",
             "output_format": "both",
             "time_window": "last_3_months",
             "sub_questions": [query, f"{query} 市场分析", f"{query} 技术进展"],
-            "estimated_duration_minutes": 5
+            "estimated_duration_minutes": 5,
         },
-        "errors": [],
-        "gaps": ["需要配置 LLM API key 以获得真实分析"]
-    }
+        gaps=["需要配置 LLM API key 以获得真实分析"],
+    )
 
 
 def _error_result(error: str) -> dict[str, Any]:
-    return {
-        "task_id": str(uuid.uuid4())[:8],
-        "status": "error",
-        "data": None,
-        "errors": [error],
-        "gaps": ["planner 调用失败"]
-    }
+    return _make_tool_result(str(uuid.uuid4())[:8], None, status="error", errors=[error], gaps=["planner 调用失败"])
 
 
 def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = None) -> dict[str, Any]:
@@ -160,6 +163,11 @@ def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = No
             "gaps": list[str]
         }
     """
+    return asyncio.run(aretriever(sub_questions=sub_questions, top_k=top_k, user_id=user_id))
+
+
+async def aretriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = None) -> dict[str, Any]:
+    """Async multi-path retriever for LangGraph execution."""
     task_id = str(uuid.uuid4())[:8]
     all_evidence = []
     errors = []
@@ -175,24 +183,18 @@ def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = No
         }
 
     try:
-        from vectorstore.embedding import get_embedding_sync
         from vectorstore.milvus_store import MilvusStore
+        from retrieval import MultiPathRetriever
 
         store = MilvusStore()
+        multi_retriever = MultiPathRetriever(store)
 
         for q in sub_questions:
-            emb = get_embedding_sync(q)
-            if emb is None:
-                errors.append(f"子问题 embedding 失败: {q}")
-                continue
-
             try:
-                # user_id 过滤暂时禁用（需在 Milvus 建索引后启用）
-                # expr = f'user_id == "{user_id}"' if user_id else None
-                results = store.search(
-                    query_embedding=emb,
+                results = await multi_retriever.retrieve(
+                    query=q,
                     top_k=top_k,
-                    expr=None,  # 暂时禁用，user_id 数据隔离由 PostgreSQL 层处理
+                    filters=None,
                 )
 
                 for r in results:
@@ -201,7 +203,9 @@ def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = No
                         "content": r.get("content", ""),
                         "source": r.get("source", ""),
                         "url": r.get("url", ""),
-                        "score": float(r.get("score", 0.0)),
+                        "score": float(r.get("score", 0.0) or 0.0),
+                        "fused_score": float(r.get("fused_score", 0.0) or 0.0),
+                        "rerank_score": float(r.get("rerank_score", 0.0) or 0.0),
                         "published_at": r.get("published_at", ""),
                     })
             except Exception as e:
@@ -297,19 +301,9 @@ async def aanalyst(evidence: list[dict], focus: str = "all") -> dict[str, Any]:
         return _error_analyst(str(e))
 
 
-def _call_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
-    return asyncio.run(_async_analyst(evidence, focus))
-
-
 async def _async_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
     """调用 LLM 分析证据（async）"""
-    from llm import create_llm
-
-    llm = create_llm(
-        provider=settings.llm_provider,
-        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
-        model=settings.llm_model
-    )
+    llm = _create_research_llm()
 
     evidence_snippets = []
     for i, e in enumerate(evidence[:10]):
@@ -348,41 +342,27 @@ async def _async_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
 
     try:
         data = parse_json_object(response)
-        return {
-            "task_id": str(uuid.uuid4())[:8],
-            "status": "success",
-            "data": data,
-            "errors": [],
-            "gaps": []
-        }
+        return _make_tool_result(str(uuid.uuid4())[:8], data)
     except ValueError as e:
         logger.warning("analyst JSON parse failed, using stub", error=str(e))
         return _stub_analyst(focus)
 
 
 def _stub_analyst(focus: str) -> dict[str, Any]:
-    return {
-        "task_id": str(uuid.uuid4())[:8],
-        "status": "success",
-        "data": {
+    return _make_tool_result(
+        str(uuid.uuid4())[:8],
+        {
             "trends": [{"topic": "趋势待分析", "description": "需要配置 LLM API key 获取真实分析", "confidence": 0.5}],
             "opportunities": [],
             "risks": [],
-            "summary": "analyst 处于 stub 模式，需要配置 LLM API key"
+            "summary": "analyst 处于 stub 模式，需要配置 LLM API key",
         },
-        "errors": [],
-        "gaps": ["需要配置 LLM API key 以获得真实分析"]
-    }
+        gaps=["需要配置 LLM API key 以获得真实分析"],
+    )
 
 
 def _error_analyst(error: str) -> dict[str, Any]:
-    return {
-        "task_id": str(uuid.uuid4())[:8],
-        "status": "error",
-        "data": None,
-        "errors": [error],
-        "gaps": ["analyst 调用失败"]
-    }
+    return _make_tool_result(str(uuid.uuid4())[:8], None, status="error", errors=[error], gaps=["analyst 调用失败"])
 
 
 def checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
@@ -442,20 +422,9 @@ async def achecker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
         return _error_checker(str(e))
 
 
-def _call_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
-    """调用 LLM 进行事实核查（同步包装）"""
-    return asyncio.run(_async_checker(claims, evidence))
-
-
 async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
     """调用 LLM 进行事实核查（async）"""
-    from llm import create_llm
-
-    llm = create_llm(
-        provider=settings.llm_provider,
-        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
-        model=settings.llm_model
-    )
+    llm = _create_research_llm()
 
     # 构建 claims 文本（最多 10 条）
     claims_snippets = []
@@ -496,13 +465,7 @@ async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, 
 
     try:
         data = parse_json_object(response)
-        return {
-            "task_id": str(uuid.uuid4())[:8],
-            "status": "success",
-            "data": data,
-            "errors": [],
-            "gaps": []
-        }
+        return _make_tool_result(str(uuid.uuid4())[:8], data)
     except ValueError as e:
         logger.warning("checker JSON parse failed, using stub", error=str(e))
         return _stub_checker(claims, evidence)
@@ -510,29 +473,21 @@ async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, 
 
 def _stub_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
     """无 LLM 时的 Stub 返回"""
-    return {
-        "task_id": str(uuid.uuid4())[:8],
-        "status": "success",
-        "data": {
+    return _make_tool_result(
+        str(uuid.uuid4())[:8],
+        {
             "coverage": 0.5,
             "credibility_issues": [],
             "conflicts": [],
             "gaps": ["需要配置 LLM API key 以获得真实核查"],
-            "recommendations": ["请配置 LLM API key 以启用事实核查功能"]
+            "recommendations": ["请配置 LLM API key 以启用事实核查功能"],
         },
-        "errors": [],
-        "gaps": ["需要配置 LLM API key 以获得真实核查"]
-    }
+        gaps=["需要配置 LLM API key 以获得真实核查"],
+    )
 
 
 def _error_checker(error: str) -> dict[str, Any]:
-    return {
-        "task_id": str(uuid.uuid4())[:8],
-        "status": "error",
-        "data": None,
-        "errors": [error],
-        "gaps": ["checker 调用失败"]
-    }
+    return _make_tool_result(str(uuid.uuid4())[:8], None, status="error", errors=[error], gaps=["checker 调用失败"])
 
 
 def writer(analysis: dict, check_result: dict | None, output_format: str = "both") -> dict[str, Any]:
@@ -576,11 +531,6 @@ async def awriter(
         return _error_writer(str(e))
 
 
-def _call_writer(analysis: dict, check_result: dict | None, output_format: str) -> dict[str, Any]:
-    """调用 LLM 生成报告（同步包装）"""
-    return asyncio.run(_async_writer(analysis, check_result, output_format))
-
-
 async def _build_ppt_content(
     analysis: dict,
     check_result: dict | None,
@@ -589,7 +539,7 @@ async def _build_ppt_content(
     """构建 PPT 大纲和逐页内容（LLM 驱动）"""
 
     # 提取 analyst 数据
-    data = analysis.get("data", {}) if isinstance(analysis, dict) else {}
+    data = analysis.get("data", analysis) if isinstance(analysis, dict) else {}
     trends = data.get("trends", [])
     opportunities = data.get("opportunities", [])
     risks = data.get("risks", [])
@@ -597,7 +547,7 @@ async def _build_ppt_content(
     audience = data.get("audience", "行业研究者")
 
     # 提取 checker 数据
-    check_data = check_result.get("data", {}) if isinstance(check_result, dict) and check_result else {}
+    check_data = check_result.get("data", check_result) if isinstance(check_result, dict) and check_result else {}
     gaps = check_data.get("gaps", [])
     recommendations = check_data.get("recommendations", [])
 
@@ -722,23 +672,17 @@ def _generate_fallback_ppt(audience: str) -> tuple[dict, list[dict]]:
 
 async def _async_writer(analysis: dict, check_result: dict | None, output_format: str) -> dict[str, Any]:
     """调用 LLM 生成 Markdown 报告（async）"""
-    from llm import create_llm
-
-    llm = create_llm(
-        provider=settings.llm_provider,
-        api_key=getattr(settings, f"{settings.llm_provider}_api_key"),
-        model=settings.llm_model
-    )
+    llm = _create_research_llm()
 
     # 提取 analyst 数据（兼容 stub 输出）
-    data = analysis.get("data", {}) if isinstance(analysis, dict) else {}
+    data = analysis.get("data", analysis) if isinstance(analysis, dict) else {}
     trends = data.get("trends", [])
     opportunities = data.get("opportunities", [])
     risks = data.get("risks", [])
     summary = data.get("summary", "暂无摘要")
 
     # 提取 checker 数据（兼容 stub 输出）
-    check_data = check_result.get("data", {}) if isinstance(check_result, dict) and check_result else {}
+    check_data = check_result.get("data", check_result) if isinstance(check_result, dict) and check_result else {}
     coverage = check_data.get("coverage", 0.0)
     credibility_issues = check_data.get("credibility_issues", [])
     conflicts = check_data.get("conflicts", [])
@@ -761,17 +705,14 @@ async def _async_writer(analysis: dict, check_result: dict | None, output_format
     else:
         ppt_outline, slides = {"title": "研究汇报", "pages": []}, []
 
-    return {
-        "task_id": str(uuid.uuid4())[:8],
-        "status": "success",
-        "data": {
+    return _make_tool_result(
+        str(uuid.uuid4())[:8],
+        {
             "report_md": report_md,
             "ppt_outline": ppt_outline,
-            "slides": slides
+            "slides": slides,
         },
-        "errors": [],
-        "gaps": []
-    }
+    )
 
 
 async def _build_markdown_report(
@@ -930,14 +871,14 @@ def _generate_fallback_report(
 
 def _stub_writer(analysis: dict, check_result: dict | None) -> dict[str, Any]:
     """无 LLM 时的 Stub 返回"""
-    data = analysis.get("data", {}) if isinstance(analysis, dict) else {}
+    data = analysis.get("data", analysis) if isinstance(analysis, dict) else {}
     summary = data.get("summary", "暂无摘要")
     trends = data.get("trends", [])
     opportunities = data.get("opportunities", [])
     risks = data.get("risks", [])
     audience = data.get("audience", "行业研究者")
 
-    check_data = check_result.get("data", {}) if isinstance(check_result, dict) and check_result else {}
+    check_data = check_result.get("data", check_result) if isinstance(check_result, dict) and check_result else {}
     coverage = check_data.get("coverage", 0.0)
     recommendations = check_data.get("recommendations", [])
 
@@ -973,24 +914,16 @@ def _stub_writer(analysis: dict, check_result: dict | None) -> dict[str, Any]:
     # 生成 fallback PPT
     ppt_outline, slides = _generate_fallback_ppt(audience)
 
-    return {
-        "task_id": str(uuid.uuid4())[:8],
-        "status": "success",
-        "data": {
+    return _make_tool_result(
+        str(uuid.uuid4())[:8],
+        {
             "report_md": report_md,
             "ppt_outline": ppt_outline,
-            "slides": slides
+            "slides": slides,
         },
-        "errors": [],
-        "gaps": ["writer 处于 stub 模式，需要配置 LLM API key"]
-    }
+        gaps=["writer 处于 stub 模式，需要配置 LLM API key"],
+    )
 
 
 def _error_writer(error: str) -> dict[str, Any]:
-    return {
-        "task_id": str(uuid.uuid4())[:8],
-        "status": "error",
-        "data": None,
-        "errors": [error],
-        "gaps": ["writer 调用失败"]
-    }
+    return _make_tool_result(str(uuid.uuid4())[:8], None, status="error", errors=[error], gaps=["writer 调用失败"])

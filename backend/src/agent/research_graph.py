@@ -6,7 +6,8 @@ from langgraph.graph import END, StateGraph
 from core import get_logger
 
 from .research_state import ResearchState
-from .research_tools import aplanner, retriever, aanalyst, achecker, awriter
+from .research_tools import aplanner, aretriever, aanalyst, achecker, awriter
+from .research_memory import assemble_research_memory, build_evidence_trace, build_quality_report
 
 logger = get_logger(__name__)
 
@@ -16,6 +17,16 @@ async def notify_step(state: ResearchState, step: str) -> None:
     if callback is None:
         return
     await callback(step, state)
+
+
+def append_execution_log(state: ResearchState, step: str, status: str = "started") -> list[dict]:
+    log = list(state.get("execution_log", []))
+    log.append({
+        "step": step,
+        "status": status,
+        "tool_call_count": state.get("tool_call_count", 0),
+    })
+    return log
 
 
 def should_continue(state: ResearchState) -> Literal["retriever", "writer"]:
@@ -100,6 +111,10 @@ async def run_research(
         "gaps": [],
         "conflicts": [],
         "final_output": None,
+        "evidence_trace": [],
+        "quality_report": None,
+        "execution_log": [],
+        "memory_snapshot": None,
         "failed_step": None,
         "retry_count": 0,
         "error": None,
@@ -121,6 +136,7 @@ async def _planner_node(state: ResearchState) -> dict:
         "current_step": "planner",
         "plan": plan,
         "sub_questions": sub_questions,
+        "execution_log": append_execution_log(state, "planner", "completed"),
     }
 
 
@@ -129,31 +145,37 @@ async def _call_planner(state: ResearchState) -> dict:
     return result.get("data", {})
 
 
-def _call_retriever(state: ResearchState) -> dict:
+async def _call_retriever(state: ResearchState) -> dict:
     if state.get("gaps") and state.get("tool_call_count", 0) > 0:
         sub_questions = state.get("gaps", [])
     else:
         sub_questions = state.get("sub_questions", []) or [state["query"]]
 
-    result = retriever(sub_questions=sub_questions, user_id=state.get("user_id"))
+    result = await aretriever(sub_questions=sub_questions, user_id=state.get("user_id"))
     existing = state.get("evidence", [])
     new_evidence = result.get("data", {}).get("evidence", [])
     merged = _merge_evidence(existing, new_evidence)
     return {
         "current_step": "retriever",
         "evidence": merged,
-        "tool_call_count": state.get("tool_call_count", 0) + 1
+        "evidence_trace": build_evidence_trace(merged),
+        "tool_call_count": state.get("tool_call_count", 0) + 1,
+        "execution_log": append_execution_log(state, "retriever", "completed"),
     }
 
 
 async def _retriever_node(state: ResearchState) -> dict:
     await notify_step(state, "retriever")
-    return _call_retriever(state)
+    return await _call_retriever(state)
 
 
 async def _analyst_node(state: ResearchState) -> dict:
     await notify_step(state, "analyst")
-    return {"current_step": "analyst", "analysis": await _call_analyst(state)}
+    return {
+        "current_step": "analyst",
+        "analysis": await _call_analyst(state),
+        "execution_log": append_execution_log(state, "analyst", "completed"),
+    }
 
 
 async def _call_analyst(state: ResearchState) -> dict:
@@ -175,12 +197,26 @@ async def _checker_node(state: ResearchState) -> dict:
         "check_result": check_result,
         "gaps": check_result.get("gaps", []),
         "conflicts": check_result.get("conflicts", []),
+        "quality_report": build_quality_report(
+            state.get("evidence", []),
+            check_result,
+            check_result.get("gaps", []),
+        ),
+        "execution_log": append_execution_log(state, "checker", "completed"),
     }
 
 
 async def _writer_node(state: ResearchState) -> dict:
     await notify_step(state, "writer")
-    return {"current_step": "writer", "final_output": await _call_writer(state)}
+    final_output = await _call_writer(state)
+    next_state = dict(state)
+    next_state.update({"current_step": "writer", "final_output": final_output})
+    return {
+        "current_step": "writer",
+        "final_output": final_output,
+        "memory_snapshot": assemble_research_memory(next_state),
+        "execution_log": append_execution_log(state, "writer", "completed"),
+    }
 
 
 async def _call_writer(state: ResearchState) -> dict:

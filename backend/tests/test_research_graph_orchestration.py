@@ -52,7 +52,7 @@ class ResearchGraphOrchestrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_retriever_uses_checker_gaps_for_supplemental_search_and_merges_evidence(self):
         seen_queries = []
 
-        def fake_retriever(sub_questions, user_id=None):
+        async def fake_retriever(sub_questions, user_id=None):
             seen_queries.extend(sub_questions)
             return {
                 "data": {
@@ -72,12 +72,13 @@ class ResearchGraphOrchestrationTests(unittest.IsolatedAsyncioTestCase):
             "tool_call_count": 1,
         }
 
-        with patch.object(research_graph, "retriever", fake_retriever):
-            result = research_graph._call_retriever(state)
+        with patch.object(research_graph, "aretriever", fake_retriever):
+            result = await research_graph._call_retriever(state)
 
         self.assertEqual(seen_queries, ["missing adoption data"])
         self.assertEqual([item["title"] for item in result["evidence"]], ["Existing", "New"])
         self.assertEqual(result["tool_call_count"], 2)
+        self.assertEqual(result["evidence_trace"][1]["evidence_id"], "E002")
 
     async def test_should_continue_stops_on_configuration_gaps(self):
         state = {

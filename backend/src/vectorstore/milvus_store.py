@@ -1,4 +1,5 @@
 from typing import Any
+import hashlib
 
 from pymilvus import (
     Collection,
@@ -15,6 +16,29 @@ logger = get_logger(__name__)
 
 COLLECTION_NAME = "news_articles"
 DIM = 1024
+
+
+def compute_content_hash(record: dict[str, Any]) -> str:
+    """Compute a stable deduplication hash for a news record."""
+    content_str = f"{record.get('title', '')}|{record.get('content', '')}"
+    return hashlib.sha256(content_str.encode()).hexdigest()
+
+
+def filter_new_records_by_hash(
+    records: list[dict[str, Any]],
+    existing_hashes: set[str],
+) -> list[dict[str, Any]]:
+    """Remove records already seen in storage or earlier in the same batch."""
+    seen = set(existing_hashes)
+    filtered = []
+    for record in records:
+        content_hash = record.get("content_hash") or compute_content_hash(record)
+        if content_hash in seen:
+            continue
+        record["content_hash"] = content_hash
+        seen.add(content_hash)
+        filtered.append(record)
+    return filtered
 
 
 def get_milvus_connection():
@@ -43,6 +67,14 @@ def create_schema() -> CollectionSchema:
         FieldSchema(name="category", dtype=DataType.VARCHAR, max_length=32),
         FieldSchema(name="published_at", dtype=DataType.INT64),
         FieldSchema(name="content_hash", dtype=DataType.VARCHAR, max_length=64),
+        FieldSchema(name="url", dtype=DataType.VARCHAR, max_length=2048),
+        FieldSchema(name="author", dtype=DataType.VARCHAR, max_length=256),
+        FieldSchema(name="external_id", dtype=DataType.VARCHAR, max_length=256),
+        FieldSchema(name="fetched_at", dtype=DataType.INT64),
+        FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, max_length=128),
+        FieldSchema(name="parent_doc_id", dtype=DataType.VARCHAR, max_length=128),
+        FieldSchema(name="user_id", dtype=DataType.VARCHAR, max_length=64),
+        FieldSchema(name="company_id", dtype=DataType.VARCHAR, max_length=64),
     ]
     return CollectionSchema(fields=fields, description="News articles collection")
 
@@ -95,20 +127,26 @@ class MilvusStore:
                 field_name="title",
                 index_params={"index_type": "STL_SORT"},
             )
+            self._collection.create_index(
+                field_name="content",
+                index_params={"index_type": "STL_SORT"},
+            )
         except Exception as e:
-            logger.warning("title_index_creation_failed", error=str(e))
+            logger.warning("scalar_index_creation_failed", error=str(e))
 
         self._collection.load()
         logger.info("collection_created", name=self.collection_name)
 
     def insert(self, records: list[dict[str, Any]]) -> list[int]:
         """Insert records into collection."""
-        import hashlib
-
         for record in records:
             # Compute content hash for deduplication
-            content_str = f"{record['title']}|{record['content']}"
-            record["content_hash"] = hashlib.sha256(content_str.encode()).hexdigest()
+            record["content_hash"] = compute_content_hash(record)
+
+        records = self._filter_existing_records(records)
+        if not records:
+            logger.info("records_insert_skipped_all_duplicates")
+            return []
 
         entities = [
             [r.get("title", "") for r in records],
@@ -119,10 +157,16 @@ class MilvusStore:
             [r.get("published_at", 0) for r in records],
             [r.get("content_hash", "") for r in records],
             [r.get("embedding", [0.0] * DIM) for r in records],
+            [r.get("url", "") for r in records],
+            [r.get("author", "") for r in records],
+            [r.get("external_id", "") for r in records],
+            [r.get("fetched_at", 0) for r in records],
+            [r.get("chunk_id", "") for r in records],
+            [r.get("parent_doc_id", "") for r in records],
+            [r.get("user_id", "") for r in records],
+            [r.get("company_id", "") for r in records],
         ]
 
-        # Note: Schema uses auto_id, so we can't include 'id' field in insert
-        # Re-order to match schema: id, embedding, title, content, source, language, category, published_at, content_hash
         insert_entities = [
             entities[7],  # embedding
             entities[0],  # title
@@ -132,12 +176,43 @@ class MilvusStore:
             entities[4],  # category
             entities[5],  # published_at
             entities[6],  # content_hash
+            entities[8],  # url
+            entities[9],  # author
+            entities[10],  # external_id
+            entities[11],  # fetched_at
+            entities[12],  # chunk_id
+            entities[13],  # parent_doc_id
+            entities[14],  # user_id
+            entities[15],  # company_id
         ]
 
         result = self.collection.insert(insert_entities)
         self.collection.flush()
         logger.info("records_inserted", count=len(records), ids=result.primary_keys)
         return result.primary_keys
+
+    def _filter_existing_records(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        hashes = [record["content_hash"] for record in records]
+        if not hashes:
+            return records
+
+        quoted_hashes = ", ".join(f'"{content_hash}"' for content_hash in hashes)
+        try:
+            existing = self.query(
+                expr=f"content_hash in [{quoted_hashes}]",
+                output_fields=["content_hash"],
+                limit=len(hashes),
+            )
+        except Exception as e:
+            logger.warning("content_hash_lookup_failed", error=str(e))
+            existing = []
+
+        existing_hashes = {item.get("content_hash", "") for item in existing}
+        filtered = filter_new_records_by_hash(records, existing_hashes)
+        skipped = len(records) - len(filtered)
+        if skipped:
+            logger.info("duplicate_records_skipped", count=skipped)
+        return filtered
 
     def search(
         self,
@@ -148,18 +223,26 @@ class MilvusStore:
     ) -> list[dict[str, Any]]:
         """Search by vector similarity."""
         if output_fields is None:
-            output_fields = ["title", "content", "source", "language", "category", "published_at"]
+            output_fields = [
+                "title", "content", "source", "language", "category", "published_at",
+                "content_hash", "url", "author", "external_id", "chunk_id", "parent_doc_id",
+                "user_id", "company_id",
+            ]
 
         search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
 
-        results = self.collection.search(
-            data=[query_embedding],
-            anns_field="embedding",
-            param=search_params,
-            limit=top_k,
-            expr=expr,
-            output_fields=output_fields,
-        )
+        try:
+            results = self.collection.search(
+                data=[query_embedding],
+                anns_field="embedding",
+                param=search_params,
+                limit=top_k,
+                expr=expr,
+                output_fields=output_fields,
+            )
+        except Exception as e:
+            logger.error("milvus_search_failed", error=str(e))
+            raise VectorStoreError(f"Vector search failed: {e}") from e
 
         hits = []
         for hits_list in results:
@@ -173,14 +256,26 @@ class MilvusStore:
     def query(self, expr: str, output_fields: list[str] | None = None, limit: int = 100) -> list[dict[str, Any]]:
         """Query by expression."""
         if output_fields is None:
-            output_fields = ["title", "content", "source", "language", "category", "published_at"]
+            output_fields = [
+                "title", "content", "source", "language", "category", "published_at",
+                "content_hash", "url", "author", "external_id", "chunk_id", "parent_doc_id",
+                "user_id", "company_id",
+            ]
 
-        results = self.collection.query(expr=expr, output_fields=output_fields, limit=limit)
+        try:
+            results = self.collection.query(expr=expr, output_fields=output_fields, limit=limit)
+        except Exception as e:
+            logger.error("milvus_query_failed", error=str(e))
+            raise VectorStoreError(f"Vector query failed: {e}") from e
         return results
 
     def count(self) -> int:
         """Get total entity count."""
-        return self.collection.num_entities
+        try:
+            return self.collection.num_entities
+        except Exception as e:
+            logger.error("milvus_count_failed", error=str(e))
+            raise VectorStoreError(f"Vector count failed: {e}") from e
 
     def delete_by_ids(self, ids: list[int]) -> None:
         """Delete entities by IDs."""

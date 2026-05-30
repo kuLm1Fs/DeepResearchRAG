@@ -3,14 +3,16 @@ import asyncio
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 
 from .auth import get_current_user
+from ..auth import decode_access_token
+from ..core import get_logger, write_audit_log
 from ..db.database import get_db_session
 from ..db.models import User, ResearchTask
-from ..core import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/research", tags=["research"])
@@ -61,8 +63,9 @@ async def _run_research_task(task_id: str, query: str, user_id: str, company_id:
         )
 
         final_output = result.get("final_output", {}) or result
+        final_data = final_output.get("data", final_output) if isinstance(final_output, dict) else {}
         evidence = result.get("evidence", [])
-        report_md = final_output.get("report_md", "")
+        report_md = final_data.get("report_md", "")
 
         # 更新完成状态
         async with get_db_session() as db:
@@ -74,7 +77,12 @@ async def _run_research_task(task_id: str, query: str, user_id: str, company_id:
                     current_step="completed",
                     result_markdown=report_md,
                     result_summary=report_md[:500] if report_md else "",
-                    result_slides=final_output.get("slides"),
+                    result_slides=final_data.get("slides"),
+                    ppt_outline=final_data.get("ppt_outline"),
+                    evidence_trace=result.get("evidence_trace") or None,
+                    quality_report=result.get("quality_report") or None,
+                    execution_log=result.get("execution_log") or None,
+                    memory_snapshot=result.get("memory_snapshot") or None,
                     sources_used=len(evidence),
                     gaps_identified=result.get("gaps") or None,
                     conflicts_detected=result.get("conflicts") or None,
@@ -95,13 +103,15 @@ async def _run_research_task(task_id: str, query: str, user_id: str, company_id:
                     .values(status="failed", current_step="failed", error_message=str(e))
                 )
                 await db.commit()
-        except Exception:
-            pass
+        except Exception as update_err:
+            logger.error("research_task_failure_status_update_failed", task_id=task_id, error=str(update_err))
 
 
 @router.post("", response_model=ResearchResponse)
 async def create_research(
     req: ResearchRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """
@@ -138,6 +148,18 @@ async def create_research(
             _run_research_task(task_id, req.query, user.id, user.company_id)
         )
 
+        background_tasks.add_task(
+            write_audit_log,
+            action="research.create",
+            user_id=user.id,
+            company_id=user.company_id,
+            resource_type="research",
+            resource_id=task_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            details={"query": req.query, "output_format": req.output_format},
+        )
+
         # 立即返回 task_id，不等待 LLM 完成
         return ResearchResponse(
             task_id=task_id,
@@ -153,7 +175,7 @@ async def create_research(
 
     except Exception as e:
         logger.error("research_task_creation_failed", task_id=task_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="研究任务创建失败")
 
 
 @router.get("/{task_id}")
@@ -178,6 +200,13 @@ async def get_research(task_id: str, current_user: Annotated[User, Depends(get_c
         "title": task.title,
         "result_markdown": task.result_markdown,
         "result_summary": task.result_summary,
+        "result_slides": task.result_slides,
+        "ppt_outline": task.ppt_outline,
+        "evidence_trace": task.evidence_trace,
+        "quality_report": task.quality_report,
+        "execution_log": task.execution_log,
+        "gaps_identified": task.gaps_identified,
+        "conflicts_detected": task.conflicts_detected,
         "sources_used": task.sources_used,
         "error_message": task.error_message,
         "created_at": task.created_at.isoformat() if task.created_at else None,
@@ -206,3 +235,66 @@ async def get_research_status(task_id: str, current_user: Annotated[User, Depend
         "sources_used": task.sources_used,
         "error_message": task.error_message,
     }
+
+
+async def _resolve_event_user(token: str | None) -> User:
+    if not token:
+        raise HTTPException(status_code=401, detail="缺少 token")
+    try:
+        payload = decode_access_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="无效的 token")
+    user_id = payload.get("sub")
+    async with get_db_session() as db:
+        stmt = select(User).where(User.id == user_id)
+        result = await db.execute(stmt)
+        user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="用户不存在")
+    return user
+
+
+@router.get("/{task_id}/events")
+async def stream_research_events(task_id: str, token: str | None = Query(default=None)):
+    """SSE stream for research progress, logs, report and PPT outline preview."""
+
+    current_user = await _resolve_event_user(token)
+
+    async def event_generator():
+        last_payload = None
+        while True:
+            async with get_db_session() as db:
+                stmt = select(ResearchTask).where(
+                    ResearchTask.id == task_id,
+                    ResearchTask.user_id == current_user.id,
+                )
+                result = await db.execute(stmt)
+                task = result.scalar_one_or_none()
+
+            if not task:
+                yield {"event": "error", "data": '{"type":"error","data":"任务不存在"}'}
+                return
+
+            payload = {
+                "type": "progress",
+                "task_id": task.id,
+                "status": task.status,
+                "current_step": task.current_step,
+                "execution_log": task.execution_log or [],
+                "quality_report": task.quality_report,
+                "result_markdown": task.result_markdown,
+                "ppt_outline": task.ppt_outline,
+                "sources_used": task.sources_used,
+                "error_message": task.error_message,
+            }
+            if payload != last_payload:
+                import json
+
+                yield {"event": "progress", "data": json.dumps(payload, ensure_ascii=False, default=str)}
+                last_payload = payload
+
+            if task.status in ("completed", "failed"):
+                return
+            await asyncio.sleep(1)
+
+    return EventSourceResponse(event_generator())

@@ -29,6 +29,10 @@ class ResearchState(TypedDict, total=False):
 
     # Writer 输出
     final_output: dict[str, Any] | None  # {report_md, ppt_outline, slides}
+    evidence_trace: list[dict[str, Any]]
+    quality_report: dict[str, Any] | None
+    execution_log: list[dict[str, Any]]
+    memory_snapshot: dict[str, Any] | None
 
     # 容错
     failed_step: str | None            # 失败步骤

@@ -80,6 +80,16 @@ class Settings(BaseSettings):
     # Prompt versioning
     prompt_version: str = "v1"
 
+    # Rate limiting
+    rate_limit_enabled: bool = True
+    rate_limit_default: str = "60/minute"
+    rate_limit_auth: str = "10/minute"
+    rate_limit_query: str = "20/minute"
+    rate_limit_ingest: str = "5/minute"
+
+    # Request body
+    max_request_body_size: int = 1_048_576  # 1MB
+
     @property
     def project_root(self) -> Path:
         return _project_root

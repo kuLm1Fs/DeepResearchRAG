@@ -10,7 +10,37 @@
 - [x] News RAG 问答主链路已有实现：查询 API、SSE 流式返回、来源面板、Milvus 检索、LLM 生成。
 - [ ] News RAG 端到端稳定性仍需验证：本地服务、真实 API key、真实 Milvus 数据、前后端完整查询流程。
 - [x] Deep Research 核心功能产品化：writer 生成 Markdown 报告 + PPT 大纲/逐页内容，API 完整链路（planner → retriever → analyst → checker → writer）已接入。
-- [ ] 自动测试未通过：`uv run pytest` 当前因 `ModuleNotFoundError: No module named 'scripts'` 在收集阶段失败。
+- [x] 自动测试通过：`uv run pytest` 当前全量后端测试通过。
+
+---
+
+## 生产落地差距清单
+
+### P0 — 上线前必须补齐
+
+- [x] 生产配置硬化：支持显式 env file 切换，修复生产启动配置属性不一致，禁止生产默认 debug/cache。
+- [x] CORS 安全化：生产环境禁止 `allow_origins=["*"]`，改为配置化前端白名单。
+- [x] 核心 API 鉴权：`/api/query`、`/api/stats`、`/api/ingest/*` 接入登录态，避免匿名访问业务与管理接口。
+- [x] 多租户数据隔离：查询、采集、研究任务按 `company_id/user_id` 过滤，Milvus schema/metadata 支持租户字段。
+- [x] refresh token 严格校验：刷新时校验请求 token hash、过期时间和 revoked 状态，不能只取用户最新 token。
+- [x] Milvus 查询表达式安全：用户 query/filter 进入 expr 前必须转义或通过安全构造器生成。
+- [x] Embedding 失败策略：禁止将失败批次写成零向量，改为 fail-fast 或进入重试/死信流程。
+
+### P1 — 生产可用性必须补齐
+
+- [ ] 数据导入任务化：`/api/ingest/trigger` 从同步请求升级为后台任务，支持状态、重试、取消、限速和 checkpoint。
+- [x] content_hash 去重/upsert：写入前查重，避免重复文章污染检索结果。
+- [x] 引用元数据补齐：补充 URL、作者、抓取时间、原文 ID、chunk_id、parent_doc_id，支持溯源和删除。
+- [x] 健康检查分层：拆分 `/livez` 和 `/readyz`，覆盖 PostgreSQL、Milvus、Embedding、LLM、MinIO、任务队列、磁盘。
+- [ ] 部署形态补齐：后端/前端 Dockerfile、反向代理、TLS、迁移启动流程、生产 secret 管理。
+
+### P2 — 质量、规模化与运维
+
+- [ ] 检索质量闭环：加入 reranker、黄金集、badcase 管理、线上反馈、召回/精排指标看板。
+- [ ] 测试体系补齐：Milvus/PostgreSQL/LLM mock 集成测试、SSE E2E、鉴权安全测试、并发/压测、迁移回滚测试。
+- [ ] 可观测性升级：Prometheus 指标、OpenTelemetry trace、LLM token/cost/latency、检索路径命中率、任务耗时和外部 API 错误率。
+- [x] 可观测性基础：新增 in-process counter registry 与 `/api/metrics` Prometheus 文本接口。
+- [ ] 前端生产体验：断线重连、SSE cancel、错误恢复、token 刷新、引用展开、空状态、响应式和可访问性验收。
 
 ---
 

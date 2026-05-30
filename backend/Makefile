@@ -1,4 +1,4 @@
-.PHONY: run install dev
+.PHONY: install dev prod lint format docker-build docker-up docker-down
 
 PYTHONPATH := $(shell pwd)/src
 export PYTHONPATH
@@ -7,12 +7,13 @@ export PYTHONPATH
 install:
 	uv sync
 
+## 开发模式（热重载）
 dev:
 	uv run uvicorn src.api.app:app --reload --app-dir src
 
-## 生产模式启动
+## 生产模式（gunicorn 多 worker）
 prod:
-	uv run uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --app-dir src
+	uv run gunicorn src.api.app:app -c gunicorn.conf.py
 
 ## 代码检查
 lint:
@@ -21,3 +22,15 @@ lint:
 ## 格式化
 format:
 	uv run ruff format src/
+
+## Docker: 构建所有镜像
+docker-build:
+	docker compose -f ../docker/docker-compose.yml build
+
+## Docker: 启动全栈（基础设施 + 应用）
+docker-up:
+	docker compose -f ../docker/docker-compose.yml up -d
+
+## Docker: 停止全栈
+docker-down:
+	docker compose -f ../docker/docker-compose.yml down

@@ -1,0 +1,6 @@
+ALTER TABLE research_tasks
+  ADD COLUMN IF NOT EXISTS ppt_outline JSONB,
+  ADD COLUMN IF NOT EXISTS evidence_trace JSONB,
+  ADD COLUMN IF NOT EXISTS quality_report JSONB,
+  ADD COLUMN IF NOT EXISTS execution_log JSONB,
+  ADD COLUMN IF NOT EXISTS memory_snapshot JSONB;

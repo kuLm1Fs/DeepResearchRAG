@@ -11,11 +11,14 @@ export default function AuthPage({ onAuthSuccess }: Props) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-md p-6 bg-white rounded-lg shadow-md">
-        <div className="text-center mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">RAG News</h1>
-          <p className="text-gray-500 text-sm mt-1">AI 行业深度研究平台</p>
+    <div className="auth-page">
+      <div className="auth-card">
+        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+          <div className="brand-mark" style={{ width: '56px', height: '56px', margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 800, color: 'var(--accent)' }}>
+            R
+          </div>
+          <h1 className="auth-title">RAG News</h1>
+          <p className="auth-subtitle">AI-powered news intelligence</p>
         </div>
         {mode === 'login' ? (
           <LoginForm

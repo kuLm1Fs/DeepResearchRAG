@@ -1,17 +1,47 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { getAccessToken } from '../api/client'
+import ErrorBoundary from './ErrorBoundary'
 import type { Message, Source } from '../types'
+
+const AVATAR_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23171312'/%3E%3Ctext x='50' y='68' font-size='50' font-weight='bold' text-anchor='middle' fill='white'%3ER%3C/text%3E%3C/svg%3E"
+
+interface MessageBubbleProps {
+  message: Message
+}
+
+const MessageBubble = memo(function MessageBubble({ message }: MessageBubbleProps) {
+  return (
+    <article className={`message ${message.role}`}>
+      {message.role === 'assistant' && (
+        <img className="avatar" src={AVATAR_SVG} alt="" aria-hidden="true" />
+      )}
+      <div className="bubble">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+      </div>
+    </article>
+  )
+})
 
 interface ChatWindowProps {
   onSourcesUpdate: (sources: Source[]) => void
+  externalQuery?: string
+  onExternalQueryConsumed?: () => void
 }
 
-export default function ChatWindow({ onSourcesUpdate }: ChatWindowProps) {
+export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQueryConsumed }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (externalQuery) {
+      setInput(externalQuery)
+      onExternalQueryConsumed?.()
+    }
+  }, [externalQuery, onExternalQueryConsumed])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -49,8 +79,8 @@ export default function ChatWindow({ onSourcesUpdate }: ChatWindowProps) {
     return 'Unknown error'
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent) => {
+    if ('preventDefault' in e) e.preventDefault()
     if (!input.trim() || loading) return
 
     const userMessage = input.trim()
@@ -63,6 +93,7 @@ export default function ChatWindow({ onSourcesUpdate }: ChatWindowProps) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
         },
         body: JSON.stringify({ query: userMessage, top_k: 5, stream: true }),
         signal: AbortSignal.timeout(30000),
@@ -124,68 +155,62 @@ export default function ChatWindow({ onSourcesUpdate }: ChatWindowProps) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [input, loading, onSourcesUpdate])
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+    <>
+      <section className="messages" aria-label="对话内容">
+        <ErrorBoundary fallback={<div style={{ padding: '24px', textAlign: 'center', color: 'var(--muted)' }}>Message rendering error. Please refresh.</div>}>
         {messages.length === 0 && (
-          <div className="text-center text-gray-500 mt-20">
-            <p className="text-lg">Ask me anything about the news!</p>
-            <p className="text-sm mt-2">I'll search through the articles and provide answers with sources.</p>
+          <div className="empty-state">
+            <h2>Ask me anything</h2>
+            <p>Search through news articles and get answers with source citations.</p>
           </div>
         )}
 
         {messages.map((msg, idx) => (
-          <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div
-              className={`max-w-xl px-4 py-3 rounded-lg ${
-                msg.role === 'user'
-                  ? 'bg-primary text-white'
-                  : msg.isError
-                  ? 'bg-red-100 text-red-700 border border-red-300'
-                  : 'bg-gray-100 text-gray-900'
-              }`}
-            >
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-            </div>
-          </div>
+          <MessageBubble key={idx} message={msg} />
         ))}
 
         {loading && (
-          <div className="flex justify-start">
-            <div className="bg-gray-100 px-4 py-3 rounded-lg">
-              <div className="flex gap-1">
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          <article className="message assistant">
+            <img className="avatar" src={AVATAR_SVG} alt="" aria-hidden="true" />
+            <div className="bubble">
+              <div className="loading-dots">
+                <span></span>
+                <span></span>
+                <span></span>
               </div>
             </div>
-          </div>
+          </article>
         )}
 
         <div ref={messagesEndRef} />
-      </div>
+        </ErrorBoundary>
+      </section>
 
-      <form onSubmit={handleSubmit} className="border-t border-gray-200 p-4">
-        <div className="flex gap-3">
-          <input
-            type="text"
+      <form className="composer" aria-label="发送消息">
+        <div className="composer-box">
+          <textarea
+            id="promptInput"
+            rows={1}
+            placeholder="Ask a question about the news..."
+            aria-label="输入消息"
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder="Ask a question about the news..."
-            className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
             disabled={loading}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                handleSubmit(e)
+              }
+            }}
           />
-          <button
-            type="submit"
-            disabled={loading || !input.trim()}
-            className="px-6 py-3 bg-primary text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            Send
+          <button className="send-button" type="submit" aria-label="发送消息" onClick={handleSubmit} disabled={loading || !input.trim()}>
+            <span aria-hidden="true">→</span>
           </button>
         </div>
       </form>
-    </div>
+    </>
   )
 }

@@ -22,14 +22,3 @@ class BaseCollector(ABC):
         - published_at: int (timestamp)
         """
         pass
-
-    def collect_batch(self, batch_size: int = 100, **kwargs) -> list[dict[str, Any]]:
-        """Collect a batch of records."""
-        batch = []
-        for record in self.collect(**kwargs):
-            batch.append(record)
-            if len(batch) >= batch_size:
-                yield batch
-                batch = []
-        if batch:
-            yield batch

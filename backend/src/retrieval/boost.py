@@ -98,16 +98,3 @@ def boost_results(
     return boosted
 
 
-def merge_boosted_results(results: list[dict], original_results: list[dict]) -> list[dict]:
-    """保留原始分数的同时加入 boosted 分数。"""
-    boosted_map = {r.get("title"): r for r in results}
-
-    merged = []
-    for r in original_results:
-        title = r.get("title", "")
-        if title in boosted_map:
-            merged.append(boosted_map[title])
-        else:
-            merged.append(r)
-
-    return merged

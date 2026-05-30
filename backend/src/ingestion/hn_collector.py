@@ -6,6 +6,7 @@ import httpx
 import structlog
 from datetime import datetime, timezone
 from typing import Any, Iterator
+import hashlib
 
 from tenacity import (
     retry,
@@ -145,11 +146,12 @@ class HNCollector(BaseCollector):
             if not title:
                 return None
 
-            # 解析内容（可能为空）
-            content = item.get("text", "") or item.get("url", "") or ""
-
             # 解析 URL
             url_link = item.get("url", "") or f"https://news.ycombinator.com/item?id={item_id}"
+
+            # 解析内容（优先 HN text，必要时用 trafilatura 抓取外链全文）
+            content = item.get("text", "") or ""
+            full_text = content or self._fetch_full_text(url_link) or url_link
 
             # 解析发布时间（Unix timestamp）
             timestamp = item.get("time", 0)
@@ -165,11 +167,13 @@ class HNCollector(BaseCollector):
             descendants = item.get("descendants", 0)
 
             # 组合内容（包含元数据）
-            full_content = content
+            full_content = full_text
             if not full_content:
                 full_content = f"HN Score: {score} | Comments: {descendants} | Author: {author}"
             else:
-                full_content = f"{content}\n\nHN Score: {score} | Comments: {descendants} | Author: {author}"
+                full_content = f"{full_text}\n\nHN Score: {score} | Comments: {descendants} | Author: {author}"
+
+            content_hash = hashlib.sha256(f"{title}|{full_content}".encode()).hexdigest()
 
             return {
                 "title": title,
@@ -179,6 +183,8 @@ class HNCollector(BaseCollector):
                 "category": "tech",
                 "published_at": published_at,
                 "url": url_link,
+                "content_hash": content_hash,
+                "pub_time": datetime.fromtimestamp(published_at, tz=timezone.utc).isoformat() if published_at else "",
                 "hn_score": score,
                 "hn_comments": descendants,
                 "hn_author": author,
@@ -186,6 +192,27 @@ class HNCollector(BaseCollector):
 
         except Exception as e:
             logger.warning("[HNCollector] 获取文章详情失败", item_id=item_id, error=str(e))
+            return None
+
+    @staticmethod
+    def _fetch_full_text(url: str) -> str | None:
+        """Fetch external story text with trafilatura when available."""
+        if "news.ycombinator.com/item" in url:
+            return None
+        try:
+            import trafilatura
+
+            downloaded = trafilatura.fetch_url(url)
+            if not downloaded:
+                return None
+            return trafilatura.extract(
+                downloaded,
+                include_comments=False,
+                include_tables=True,
+                output_format="txt",
+            )
+        except Exception as exc:
+            logger.debug("hn_trafilatura_fetch_failed", url=url, error=str(exc))
             return None
 
     def collect(self, story_type: str = "top", **kwargs) -> Iterator[dict[str, Any]]:
@@ -198,15 +225,16 @@ class HNCollector(BaseCollector):
         Yields:
             标准化的文章字典
         """
-        logger.info("[HNCollector] 开始采集 HN 文章", story_type=story_type, limit=self.limit)
+        limit = kwargs.get("limit") or self.limit
+        logger.info("[HNCollector] 开始采集 HN 文章", story_type=story_type, limit=limit)
 
         # 根据类型获取文章 ID 列表
         if story_type == "new":
-            story_ids = self._get_new_stories()
+            story_ids = self._get_new_stories()[:limit]
         elif story_type == "best":
-            story_ids = self._get_best_stories()
+            story_ids = self._get_best_stories()[:limit]
         else:
-            story_ids = self._get_top_stories()
+            story_ids = self._get_top_stories()[:limit]
 
         if not story_ids:
             logger.warning("[HNCollector] 未获取到文章ID列表")

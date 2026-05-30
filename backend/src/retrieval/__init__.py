@@ -1,6 +1,7 @@
 from .retriever import MultiPathRetriever, reciprocal_rank_fusion
 from .fusion import fusion
-from .boost import boost_results, calculate_time_decay, calculate_source_quality, merge_boosted_results
+from .boost import boost_results, calculate_time_decay, calculate_source_quality
+from .reranker import CrossEncoderReranker
 
 __all__ = [
     "MultiPathRetriever",
@@ -9,5 +10,5 @@ __all__ = [
     "boost_results",
     "calculate_time_decay",
     "calculate_source_quality",
-    "merge_boosted_results",
+    "CrossEncoderReranker",
 ]

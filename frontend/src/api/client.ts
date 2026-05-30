@@ -1,4 +1,4 @@
-import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, QueryRequest, QueryResponse, Source, LoginRequest, RegisterRequest, AuthResponse, RefreshRequest, RefreshResponse, UserInfo, ResearchTaskResponse } from '../types'
+import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, QueryRequest, QueryResponse, Source, LoginRequest, RegisterRequest, AuthResponse, UserInfo, ResearchTaskResponse } from '../types'
 
 const API_BASE = '/api'
 
@@ -13,6 +13,11 @@ export interface Stats {
   last_updated?: string | null
 }
 
+function getAuthHeaders(): Record<string, string> {
+  const token = getAccessToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 /**
  * 通用错误处理 fetch 工具函数
  */
@@ -25,7 +30,7 @@ export async function fetchWithErrorHandling<T>(url: string, options?: RequestIn
   const response = await fetch(url, {
     ...options,
     headers: {
-      ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
+      ...getAuthHeaders(),
       ...(options?.headers || {}),
     },
     signal,
@@ -44,7 +49,7 @@ export async function query(request: QueryRequest): Promise<Response> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
+      ...getAuthHeaders(),
     },
     body: JSON.stringify(request),
   })
@@ -105,20 +110,16 @@ export async function logout() {
 }
 
 export function getStoredUser(): UserInfo | null {
-  const u = localStorage.getItem('user')
-  return u ? JSON.parse(u) : null
+  try {
+    const u = localStorage.getItem('user')
+    return u ? JSON.parse(u) : null
+  } catch {
+    return null
+  }
 }
 
 export function getAccessToken(): string | null {
   return localStorage.getItem('access_token')
-}
-
-export async function refreshToken(req: RefreshRequest): Promise<RefreshResponse> {
-  return fetchWithErrorHandling<RefreshResponse>(`${API_BASE}/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  })
 }
 
 export async function createResearchTask(query: string): Promise<ResearchTaskResponse> {

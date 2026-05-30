@@ -3,40 +3,36 @@ import SourceCard from './SourceCard'
 
 interface SourcePanelProps {
   sources: Source[]
+  compact?: boolean
 }
 
-/**
- * 来源面板组件
- * 展示检索到的相关文章列表，使用 SourceCard 渲染
- * Clean Light 风格，Tailwind CSS
- */
-export default function SourcePanel({ sources }: SourcePanelProps) {
+export default function SourcePanel({ sources, compact = false }: SourcePanelProps) {
   if (sources.length === 0) {
     return (
-      <div className="p-4 text-center text-gray-500 text-sm">
-        暂无来源。输入问题以查看相关文章。
+      <div className="source-list">
+        <div style={{ padding: '12px', textAlign: 'center', fontSize: '12px', color: 'var(--faint)' }}>
+          No sources yet
+        </div>
       </div>
     )
   }
 
+  const displaySources = compact ? sources.slice(0, 5) : sources
+
   return (
-    <div className="p-4 space-y-3 overflow-y-auto max-h-full">
-      {sources.map((source, idx) => (
+    <div className="source-list">
+      {displaySources.map((source, idx) => (
         <SourceCard
           key={idx}
-          article={{
-            id: idx,
-            title: source.title,
-            content: source.content,
-            source: source.source,
-            category: source.category,
-            language: 'unknown',
-            published_at: source.published_at || Date.now() / 1000,
-            score: source.score,
-            url: source.url
-          }}
+          source={source}
+          compact={compact}
         />
       ))}
+      {compact && sources.length > 5 && (
+        <div style={{ textAlign: 'center', fontSize: '11px', color: 'var(--faint)', padding: '8px' }}>
+          +{sources.length - 5} more sources
+        </div>
+      )}
     </div>
   )
 }

@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
+import type { HistoryItem } from '../types';
 
-export interface HistoryItem {
-  id: string;
-  query: string;
-  timestamp: number;
-  sourceCount: number;
+interface HistoryPanelProps {
+  compact?: boolean;
+  onQuerySelect?: (query: string) => void;
+  refreshKey?: number;
 }
 
-// 从 localStorage 读取历史
 function getHistory(): HistoryItem[] {
   try {
     const stored = localStorage.getItem('query_history');
@@ -18,24 +17,34 @@ function getHistory(): HistoryItem[] {
 }
 
 function saveHistory(history: HistoryItem[]): void {
-  localStorage.setItem('query_history', JSON.stringify(history.slice(0, 50))); // 最多50条
+  localStorage.setItem('query_history', JSON.stringify(history.slice(0, 50)));
 }
 
-export function HistoryPanel() {
+export function addToHistory(query: string, sourceCount: number): void {
+  const history = getHistory();
+  history.unshift({
+    id: Date.now().toString(),
+    query,
+    timestamp: Date.now(),
+    sourceCount,
+  });
+  saveHistory(history);
+}
+
+export function HistoryPanel({ compact = false, onQuerySelect, refreshKey }: HistoryPanelProps) {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
     setHistory(getHistory());
-  }, []);
+  }, [refreshKey]);
 
   const filtered = history.filter(item =>
     item.query.toLowerCase().includes(search.toLowerCase())
   );
 
   const handleSelect = (item: HistoryItem) => {
-    // 通过自定义事件通知 ChatWindow
-    window.dispatchEvent(new CustomEvent('load-query', { detail: item.query }));
+    onQuerySelect?.(item.query);
   };
 
   const handleClear = () => {
@@ -47,6 +56,25 @@ export function HistoryPanel() {
     const date = new Date(ts);
     return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
+
+  if (compact) {
+    return (
+      <div className="history-list">
+        {filtered.length === 0 ? (
+          <div style={{ padding: '12px', textAlign: 'center', fontSize: '12px', color: 'var(--faint)' }}>
+            No history yet
+          </div>
+        ) : (
+          filtered.slice(0, 5).map(item => (
+            <div key={item.id} className="history-item" onClick={() => handleSelect(item)}>
+              <span>{item.query}</span>
+              <small>{formatTime(item.timestamp)}</small>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-lg shadow p-4">
@@ -85,16 +113,4 @@ export function HistoryPanel() {
       </div>
     </div>
   );
-}
-
-// 导出保存历史的方法
-export function addToHistory(query: string, sourceCount: number): void {
-  const history = getHistory();
-  history.unshift({
-    id: Date.now().toString(),
-    query,
-    timestamp: Date.now(),
-    sourceCount,
-  });
-  saveHistory(history);
 }

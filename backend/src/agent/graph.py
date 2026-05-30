@@ -33,6 +33,7 @@ def build_initial_state(
     top_k: int = 5,
     use_history: bool = False,
     history: list[dict] | None = None,
+    filters: dict | None = None,
 ) -> AgentState:
     """Build a consistent initial state for all agent entrypoints."""
     return {
@@ -41,6 +42,7 @@ def build_initial_state(
         "top_k": top_k,
         "use_history": use_history,
         "conversation_history": history or [],
+        "filters": filters or {},
         "iteration": 0,
         "error": None,
         "re_search_count": 0,
@@ -224,7 +226,14 @@ def get_compiled_graph():
     return compiled_graph
 
 
-async def run_agent(query: str, trace_id: str = "", top_k: int = 5, use_history: bool = False, history: list[dict] = None) -> dict:
+async def run_agent(
+    query: str,
+    trace_id: str = "",
+    top_k: int = 5,
+    use_history: bool = False,
+    history: list[dict] = None,
+    filters: dict | None = None,
+) -> dict:
     """运行 Agent，返回结果。"""
     graph = get_compiled_graph()
     initial_state = build_initial_state(
@@ -233,11 +242,17 @@ async def run_agent(query: str, trace_id: str = "", top_k: int = 5, use_history:
         top_k=top_k,
         use_history=use_history,
         history=history,
+        filters=filters,
     )
     return await graph.ainvoke(initial_state)
 
 
-async def run_agent_stream(query: str, trace_id: str = "", top_k: int = 5) -> AsyncIterator[dict]:
+async def run_agent_stream(
+    query: str,
+    trace_id: str = "",
+    top_k: int = 5,
+    filters: dict | None = None,
+) -> AsyncIterator[dict]:
     """流式运行 Agent。
 
     产出顺序：
@@ -248,7 +263,7 @@ async def run_agent_stream(query: str, trace_id: str = "", top_k: int = 5) -> As
     sources = []
     answer_parts = []
 
-    state = build_initial_state(query=query, trace_id=trace_id, top_k=top_k)
+    state = build_initial_state(query=query, trace_id=trace_id, top_k=top_k, filters=filters)
 
     try:
         state = await prepare_answer_state(state)

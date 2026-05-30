@@ -161,16 +161,17 @@ class DatasetCollector(BaseCollector):
         Yields:
             标准化的文章字典
         """
-        logger.info("[DatasetCollector] 开始采集数据集", dataset=self.dataset_name, limit=self.limit)
+        limit = kwargs.get("limit") or self.limit
+        logger.info("[DatasetCollector] 开始采集数据集", dataset=self.dataset_name, limit=limit)
 
         try:
             dataset = self._load_dataset(self.config["name"], split=self.split)
 
             # 应用 limit 限制
             records = dataset
-            if self.limit is not None:
-                records = dataset.select(range(min(self.limit, len(dataset))))
-                logger.info("[DatasetCollector] 已应用样本数限制", limit=self.limit, actual=len(records))
+            if limit is not None:
+                records = dataset.select(range(min(limit, len(dataset))))
+                logger.info("[DatasetCollector] 已应用样本数限制", limit=limit, actual=len(records))
 
             success_count = 0
             for idx, item in enumerate(records):
@@ -185,21 +186,3 @@ class DatasetCollector(BaseCollector):
             logger.error("[DatasetCollector] 数据集加载失败", dataset=self.dataset_name, error=str(e))
             raise
 
-    def collect_batch(self, batch_size: int = 100, **kwargs) -> list[dict[str, Any]]:
-        """
-        批量采集数据集中的记录
-
-        Args:
-            batch_size: 每批次的样本数
-
-        Returns:
-            批次文章列表
-        """
-        batch = []
-        for article in self.collect(**kwargs):
-            batch.append(article)
-            if len(batch) >= batch_size:
-                yield batch
-                batch = []
-        if batch:
-            yield batch

@@ -2,7 +2,7 @@ import sys
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from fastapi import HTTPException
 
@@ -307,19 +307,25 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
 
         background_tasks = FakeBackgroundTasks()
 
+        # Create a real Starlette Request (slowapi requires isinstance check)
+        from starlette.requests import Request as StarletteRequest
+        mock_request = StarletteRequest(scope={"type": "http", "method": "POST", "path": "/api/ingest/trigger", "headers": []})
+
         with (
             patch("ingestion.Pipeline", return_value=FakePipeline()),
             patch.object(api_routes, "reserve_company_quota", return_value=(True, None)),
         ):
             response = await api_routes.ingest_trigger(
-                api_routes.IngestTriggerRequest(source="rss", limit=10),
+                body=api_routes.IngestTriggerRequest(source="rss", limit=10),
+                request=mock_request,
                 background_tasks=background_tasks,
                 current_user=User(),
             )
 
         self.assertEqual(response.status, "started")
         self.assertTrue(response.task_id)
-        self.assertEqual(len(background_tasks.tasks), 1)
+        # 2 tasks: run_ingest_task + write_audit_log
+        self.assertEqual(len(background_tasks.tasks), 2)
         self.assertEqual(response.articles_collected, 0)
 
     async def test_ingest_trigger_rejects_when_company_quota_is_exhausted(self):
@@ -343,12 +349,16 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
 
         background_tasks = FakeBackgroundTasks()
 
+        from starlette.requests import Request as StarletteRequest
+        mock_request = StarletteRequest(scope={"type": "http", "method": "POST", "path": "/api/ingest/trigger", "headers": []})
+
         with (
             patch("ingestion.Pipeline", return_value=FakePipeline()),
             patch.object(api_routes, "reserve_company_quota", return_value=(False, "quota exceeded")),
         ):
             response = await api_routes.ingest_trigger(
-                api_routes.IngestTriggerRequest(source="rss", limit=10),
+                body=api_routes.IngestTriggerRequest(source="rss", limit=10),
+                request=mock_request,
                 background_tasks=background_tasks,
                 current_user=User(),
             )
