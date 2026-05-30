@@ -34,7 +34,12 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     if (externalQuery) {
@@ -42,6 +47,17 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
       onExternalQueryConsumed?.()
     }
   }, [externalQuery, onExternalQueryConsumed])
+
+  // Cleanup on unmount
+  useEffect(() => () => { abortRef.current?.abort() }, [])
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 180) + 'px'
+  }, [input])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -70,6 +86,9 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
   }
 
   const formatErrorMessage = (err: unknown) => {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      return 'Generation stopped.'
+    }
     if (err instanceof DOMException && err.name === 'TimeoutError') {
       return 'Request timed out. Please try again.'
     }
@@ -78,6 +97,11 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
     }
     return 'Unknown error'
   }
+
+  const stopGeneration = useCallback(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
+  }, [])
 
   const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent) => {
     if ('preventDefault' in e) e.preventDefault()
@@ -88,73 +112,109 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
     setMessages(prev => [...prev, { role: 'user', content: userMessage }])
     setLoading(true)
 
-    try {
-      const response = await fetch('/api/query', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
-        },
-        body: JSON.stringify({ query: userMessage, top_k: 5, stream: true }),
-        signal: AbortSignal.timeout(30000),
-      })
+    const MAX_RETRIES = 3
+    let lastErr: unknown
 
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error')
-        throw new Error(`HTTP ${response.status}: ${errorText}`)
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        // Exponential backoff: 1s, 2s, 4s
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)))
+        updateLastAssistantMessage(`Retrying (${attempt}/${MAX_RETRIES})...`)
       }
 
-      if (!response.body) {
-        throw new Error('Response body is empty')
-      }
+      const controller = new AbortController()
+      abortRef.current = controller
 
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let assistantMessage = ''
-      let buffer = ''
+      try {
+        const response = await fetch('/api/query', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
+          },
+          body: JSON.stringify({
+            query: userMessage,
+            top_k: 5,
+            stream: true,
+            ...(dateFrom ? { date_from: Math.floor(new Date(dateFrom).getTime() / 1000) } : {}),
+            ...(dateTo ? { date_to: Math.floor(new Date(dateTo).getTime() / 1000) + 86399 } : {}),
+          }),
+          signal: controller.signal,
+        })
 
-      appendAssistantMessage('')
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => 'Unknown error')
+          throw new Error(`HTTP ${response.status}: ${errorText}`)
+        }
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+        if (!response.body) {
+          throw new Error('Response body is empty')
+        }
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let assistantMessage = ''
+        let buffer = ''
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const event = JSON.parse(line.slice(6))
+        if (attempt === 0) appendAssistantMessage('')
 
-              if (event.type === 'sources') {
-                onSourcesUpdate(event.data)
-              } else if (event.type === 'token') {
-                assistantMessage += event.data
-                updateLastAssistantMessage(assistantMessage)
-              } else if (event.type === 'done' && !assistantMessage) {
-                assistantMessage = event.data?.answer || ''
-                updateLastAssistantMessage(assistantMessage)
-              } else if (event.type === 'error') {
-                throw new Error(event.data || 'Streaming error')
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const event = JSON.parse(line.slice(6))
+
+                if (event.type === 'sources') {
+                  onSourcesUpdate(event.data)
+                } else if (event.type === 'token') {
+                  assistantMessage += event.data
+                  updateLastAssistantMessage(assistantMessage)
+                } else if (event.type === 'done' && !assistantMessage) {
+                  assistantMessage = event.data?.answer || ''
+                  updateLastAssistantMessage(assistantMessage)
+                } else if (event.type === 'error') {
+                  throw new Error(event.data || 'Streaming error')
+                }
+              } catch (err) {
+                if (err instanceof SyntaxError) {
+                  console.warn('[DEBUG] Skipping malformed SSE payload:', line)
+                  continue
+                }
+                throw err
               }
-            } catch (err) {
-              if (err instanceof SyntaxError) {
-                console.warn('[DEBUG] Skipping malformed SSE payload:', line)
-                continue
-              }
-              throw err
             }
           }
         }
+
+        // Success — break out of retry loop
+        lastErr = null
+        break
+      } catch (err) {
+        // Don't retry on abort (user clicked Stop)
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          updateLastAssistantMessage('Generation stopped.', true)
+          lastErr = null
+          break
+        }
+        lastErr = err
+        console.warn(`[DEBUG] Query attempt ${attempt + 1} failed:`, err)
       }
-    } catch (err) {
-      console.error('[DEBUG] Query failed:', err)
-      updateLastAssistantMessage(`Error: ${formatErrorMessage(err)}`, true)
-    } finally {
-      setLoading(false)
     }
+
+    if (lastErr) {
+      console.error('[DEBUG] Query failed after retries:', lastErr)
+      updateLastAssistantMessage(`Error: ${formatErrorMessage(lastErr)}`, true)
+    }
+
+    abortRef.current = null
+    setLoading(false)
   }, [input, loading, onSourcesUpdate])
 
   return (
@@ -190,8 +250,24 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
       </section>
 
       <form className="composer" aria-label="发送消息">
+        {showFilters && (
+          <div className="date-filter">
+            <label>
+              <span>From</span>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            </label>
+            <label>
+              <span>To</span>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+            </label>
+            {(dateFrom || dateTo) && (
+              <button type="button" className="ghost-button" onClick={() => { setDateFrom(''); setDateTo('') }}>Clear</button>
+            )}
+          </div>
+        )}
         <div className="composer-box">
           <textarea
+            ref={textareaRef}
             id="promptInput"
             rows={1}
             placeholder="Ask a question about the news..."
@@ -206,9 +282,26 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
               }
             }}
           />
-          <button className="send-button" type="submit" aria-label="发送消息" onClick={handleSubmit} disabled={loading || !input.trim()}>
-            <span aria-hidden="true">→</span>
-          </button>
+          {loading ? (
+            <button className="send-button stop-button" type="button" aria-label="停止生成" onClick={stopGeneration} title="Stop">
+              <span aria-hidden="true">■</span>
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className={`send-button filter-toggle${showFilters ? ' active' : ''}`}
+                aria-label="Toggle date filter"
+                onClick={() => setShowFilters(f => !f)}
+                title="Date filter"
+              >
+                <span aria-hidden="true">⚙</span>
+              </button>
+              <button className="send-button" type="submit" aria-label="发送消息" onClick={handleSubmit} disabled={!input.trim()}>
+                <span aria-hidden="true">→</span>
+              </button>
+            </>
+          )}
         </div>
       </form>
     </>

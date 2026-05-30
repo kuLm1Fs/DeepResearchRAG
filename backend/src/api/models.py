@@ -7,6 +7,8 @@ class QueryRequest(BaseModel):
     language: str | None = Field(default=None, description="Filter by language (en/zh)")
     category: str | None = Field(default=None, description="Filter by category")
     stream: bool = Field(default=True, description="Enable SSE streaming")
+    date_from: int | None = Field(default=None, description="Filter published_at >= (epoch seconds)")
+    date_to: int | None = Field(default=None, description="Filter published_at <= (epoch seconds)")
 
 
 class Source(BaseModel):
@@ -82,6 +84,16 @@ class IngestTriggerResponse(BaseModel):
     articles_collected: int = 0
     chunks_indexed: int = 0
     records_inserted: int = 0
+
+
+class IngestTaskResponse(BaseModel):
+    task_id: str
+    status: str  # pending | running | completed | failed
+    source: str | None
+    articles_collected: int = 0
+    chunks_indexed: int = 0
+    records_inserted: int = 0
+    error: str | None = None
 
 
 class IngestStatusResponse(BaseModel):

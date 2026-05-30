@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { ingestTrigger, getIngestStatus } from '../api/client';
-import type { IngestStatusResponse, IngestTriggerResponse } from '../types';
+import { useState, useEffect, useRef } from 'react';
+import { ingestTrigger, getIngestStatus, getIngestTask } from '../api/client';
+import type { IngestStatusResponse, IngestTriggerResponse, IngestTaskResponse } from '../types';
 
 const DATA_SOURCES = [
   { value: '', label: 'All' },
@@ -19,6 +19,8 @@ export default function IngestPanel({ compact = false }: IngestPanelProps) {
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<IngestStatusResponse | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [activeTask, setActiveTask] = useState<IngestTaskResponse | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     const fetchStatus = async () => {
@@ -32,14 +34,54 @@ export default function IngestPanel({ compact = false }: IngestPanelProps) {
     fetchStatus()
   }, [])
 
+  // Poll active task status
+  useEffect(() => {
+    if (!activeTask || activeTask.status === 'completed' || activeTask.status === 'failed') {
+      if (pollRef.current) clearInterval(pollRef.current)
+      pollRef.current = null
+      return
+    }
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const updated = await getIngestTask(activeTask.task_id)
+        setActiveTask(updated)
+        if (updated.status === 'completed') {
+          setMessage({ type: 'success', text: `Done: ${updated.articles_collected} articles, ${updated.chunks_indexed} chunks indexed` })
+          const data = await getIngestStatus()
+          setStatus(data)
+        } else if (updated.status === 'failed') {
+          setMessage({ type: 'error', text: `Failed: ${updated.error || 'Unknown error'}` })
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }, 2000)
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [activeTask])
+
   const handleTrigger = async () => {
     const normalizedLimit = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 10000) : 1000
 
     setLoading(true)
     setMessage(null)
+    setActiveTask(null)
     try {
       const result: IngestTriggerResponse = await ingestTrigger(source || undefined, normalizedLimit)
-      if (result.status !== 'error') {
+      if (result.status !== 'error' && result.task_id) {
+        setActiveTask({
+          task_id: result.task_id,
+          status: 'pending',
+          source: result.source,
+          articles_collected: 0,
+          chunks_indexed: 0,
+          records_inserted: 0,
+        })
+        setMessage({ type: 'success', text: 'Task queued...' })
+      } else if (result.status !== 'error') {
         setMessage({ type: 'success', text: result.message || `Collected: ${result.articles_collected}` })
         const data = await getIngestStatus()
         setStatus(data)
@@ -77,6 +119,9 @@ export default function IngestPanel({ compact = false }: IngestPanelProps) {
         </div>
         {message && (
           <div className={`ingest-message ${message.type}`}>{message.text}</div>
+        )}
+        {activeTask && activeTask.status === 'running' && (
+          <div className="ingest-message success">Collecting from {activeTask.source || 'all'}...</div>
         )}
         {status && (
           <div className="ingest-stats">

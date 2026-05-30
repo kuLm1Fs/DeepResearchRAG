@@ -1,4 +1,4 @@
-import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, QueryRequest, QueryResponse, Source, LoginRequest, RegisterRequest, AuthResponse, UserInfo, ResearchTaskResponse } from '../types'
+import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, IngestTaskResponse, QueryRequest, QueryResponse, Source, LoginRequest, RegisterRequest, AuthResponse, UserInfo, ResearchTaskResponse } from '../types'
 
 const API_BASE = '/api'
 
@@ -18,8 +18,41 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+// Token refresh state
+let isRefreshing = false
+let refreshQueue: Array<() => void> = []
+
+async function refreshAccessToken(): Promise<boolean> {
+  const refreshToken = localStorage.getItem('refresh_token')
+  if (!refreshToken) return false
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+    if (!res.ok) return false
+    const data = await res.json()
+    if (data.access_token) {
+      localStorage.setItem('access_token', data.access_token)
+      return true
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
+function clearAuthAndRedirect() {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+  localStorage.removeItem('user')
+  window.location.href = '/login'
+}
+
 /**
- * 通用错误处理 fetch 工具函数
+ * 通用错误处理 fetch 工具函数，支持 401 自动刷新 token
  */
 export async function fetchWithErrorHandling<T>(url: string, options?: RequestInit): Promise<T> {
   const timeoutSignal = AbortSignal.timeout(30000)
@@ -27,14 +60,40 @@ export async function fetchWithErrorHandling<T>(url: string, options?: RequestIn
     ? AbortSignal.any([options.signal, timeoutSignal])
     : timeoutSignal
 
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...getAuthHeaders(),
-      ...(options?.headers || {}),
-    },
-    signal,
-  })
+  const doFetch = async (): Promise<Response> =>
+    fetch(url, {
+      ...options,
+      headers: {
+        ...getAuthHeaders(),
+        ...(options?.headers || {}),
+      },
+      signal,
+    })
+
+  let response = await doFetch()
+
+  // Handle 401 with token refresh
+  if (response.status === 401) {
+    if (isRefreshing) {
+      // Wait for the in-progress refresh, then retry
+      await new Promise<void>(resolve => refreshQueue.push(resolve))
+      response = await doFetch()
+    } else {
+      isRefreshing = true
+      const ok = await refreshAccessToken()
+      isRefreshing = false
+      // Wake up queued requests
+      refreshQueue.forEach(resolve => resolve())
+      refreshQueue = []
+
+      if (ok) {
+        response = await doFetch()
+      } else {
+        clearAuthAndRedirect()
+        throw new Error('Session expired')
+      }
+    }
+  }
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => '')
@@ -45,14 +104,38 @@ export async function fetchWithErrorHandling<T>(url: string, options?: RequestIn
 }
 
 export async function query(request: QueryRequest): Promise<Response> {
-  return fetch(`${API_BASE}/query`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...getAuthHeaders(),
-    },
-    body: JSON.stringify(request),
-  })
+  const doFetch = () =>
+    fetch(`${API_BASE}/query`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify(request),
+    })
+
+  let response = await doFetch()
+
+  if (response.status === 401) {
+    if (isRefreshing) {
+      await new Promise<void>(resolve => refreshQueue.push(resolve))
+      response = await doFetch()
+    } else {
+      isRefreshing = true
+      const ok = await refreshAccessToken()
+      isRefreshing = false
+      refreshQueue.forEach(resolve => resolve())
+      refreshQueue = []
+      if (ok) {
+        response = await doFetch()
+      } else {
+        clearAuthAndRedirect()
+        throw new Error('Session expired')
+      }
+    }
+  }
+
+  return response
 }
 
 export async function getStats(): Promise<Stats> {
@@ -73,6 +156,10 @@ export async function ingestTrigger(source?: string, limit?: number): Promise<In
 
 export async function getIngestStatus(): Promise<IngestStatusResponse> {
   return fetchWithErrorHandling<IngestStatusResponse>(`${API_BASE}/ingest/status`)
+}
+
+export async function getIngestTask(taskId: string): Promise<IngestTaskResponse> {
+  return fetchWithErrorHandling<IngestTaskResponse>(`${API_BASE}/ingest/task/${taskId}`)
 }
 
 export async function login(req: LoginRequest): Promise<AuthResponse> {
@@ -133,4 +220,10 @@ export async function createResearchTask(query: string): Promise<ResearchTaskRes
 export function researchEventsUrl(taskId: string): string {
   const token = getAccessToken()
   return `${API_BASE}/research/${taskId}/events?token=${encodeURIComponent(token || '')}`
+}
+
+export async function cancelResearchTask(taskId: string): Promise<void> {
+  await fetchWithErrorHandling<void>(`${API_BASE}/research/${taskId}/cancel`, {
+    method: 'POST',
+  })
 }

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import AuthPage from './pages/AuthPage'
 import ChatWindow from './components/ChatWindow'
@@ -16,6 +16,14 @@ function AppContent() {
   const [sources, setSources] = useState<Source[]>([])
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
   const [externalQuery, setExternalQuery] = useState('')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // Close sidebar on escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setSidebarOpen(false) }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [])
 
   const handleSourcesUpdate = (newSources: Source[]) => {
     setSources(newSources)
@@ -32,7 +40,11 @@ function AppContent() {
   return (
     <ErrorBoundary>
     <div className="app-shell">
-      <aside className="sidebar" aria-label="侧边栏">
+      <button className="sidebar-toggle" aria-label="Toggle sidebar" onClick={() => setSidebarOpen(o => !o)}>
+        <span aria-hidden="true">{sidebarOpen ? '✕' : '☰'}</span>
+      </button>
+      {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} aria-label="侧边栏">
         <div className="brand">
           <div className="brand-mark" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: 800, color: 'var(--accent)' }}>
             R

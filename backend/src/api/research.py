@@ -17,6 +17,9 @@ from ..db.models import User, ResearchTask
 logger = get_logger(__name__)
 router = APIRouter(prefix="/research", tags=["research"])
 
+# In-memory set of cancelled task IDs. Checked by research_graph nodes.
+_cancelled_tasks: set[str] = set()
+
 
 class ResearchRequest(BaseModel):
     query: str = Field(..., min_length=2, max_length=500, description="研究问题")
@@ -56,6 +59,7 @@ async def _run_research_task(task_id: str, query: str, user_id: str, company_id:
         # 调用完整研究流程
         result = await run_research(
             query=query,
+            task_id=task_id,
             user_id=user_id,
             company_id=company_id,
             on_step=on_step,
@@ -105,6 +109,8 @@ async def _run_research_task(task_id: str, query: str, user_id: str, company_id:
                 await db.commit()
         except Exception as update_err:
             logger.error("research_task_failure_status_update_failed", task_id=task_id, error=str(update_err))
+    finally:
+        _cancelled_tasks.discard(task_id)
 
 
 @router.post("", response_model=ResearchResponse)
@@ -237,6 +243,39 @@ async def get_research_status(task_id: str, current_user: Annotated[User, Depend
     }
 
 
+@router.post("/{task_id}/cancel")
+async def cancel_research(task_id: str, current_user: Annotated[User, Depends(get_current_user)]):
+    """取消正在运行的研究任务"""
+    async with get_db_session() as db:
+        stmt = select(ResearchTask).where(
+            ResearchTask.id == task_id,
+            ResearchTask.user_id == current_user.id,
+        )
+        result = await db.execute(stmt)
+        task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    if task.status not in ("running", "pending"):
+        raise HTTPException(status_code=400, detail=f"任务已{task.status}，无法取消")
+
+    # Signal cancellation to the graph
+    _cancelled_tasks.add(task_id)
+
+    # Update DB status
+    async with get_db_session() as db:
+        await db.execute(
+            update(ResearchTask)
+            .where(ResearchTask.id == task_id)
+            .values(status="failed", current_step="failed", error_message="用户取消")
+        )
+        await db.commit()
+
+    logger.info("research_task_cancelled", task_id=task_id)
+    return {"task_id": task_id, "status": "failed", "message": "任务已取消"}
+
+
 async def _resolve_event_user(token: str | None) -> User:
     if not token:
         raise HTTPException(status_code=401, detail="缺少 token")
@@ -286,6 +325,8 @@ async def stream_research_events(task_id: str, token: str | None = Query(default
                 "ppt_outline": task.ppt_outline,
                 "sources_used": task.sources_used,
                 "error_message": task.error_message,
+                "gaps_identified": task.gaps_identified,
+                "conflicts_detected": task.conflicts_detected,
             }
             if payload != last_payload:
                 import json

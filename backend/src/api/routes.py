@@ -1,5 +1,6 @@
 import json
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -19,6 +20,7 @@ from .models import (
     Citation,
     HealthResponse,
     IngestStatusResponse,
+    IngestTaskResponse,
     IngestTriggerRequest,
     IngestTriggerResponse,
     QueryRequest,
@@ -33,10 +35,22 @@ router = APIRouter()
 router.include_router(auth_router)
 router.include_router(research_router)
 ingest_tasks: dict[str, dict] = {}
+import time as _time
+
+def _cleanup_stale_tasks(ttl_seconds: int = 3600) -> None:
+    """Remove completed/failed tasks older than ttl_seconds."""
+    now = _time.time()
+    stale = [
+        tid for tid, t in ingest_tasks.items()
+        if t.get("status") in ("completed", "failed")
+        and now - t.get("finished_at", now) > ttl_seconds
+    ]
+    for tid in stale:
+        ingest_tasks.pop(tid, None)
 
 
-def build_query_filters(request: QueryRequest, current_user) -> dict[str, str]:
-    filters = {}
+def build_query_filters(request: QueryRequest, current_user) -> dict[str, Any]:
+    filters: dict[str, Any] = {}
     if request.language:
         filters["language"] = request.language
     if request.category:
@@ -45,6 +59,10 @@ def build_query_filters(request: QueryRequest, current_user) -> dict[str, str]:
         filters["company_id"] = current_user.company_id
     if getattr(current_user, "id", None):
         filters["user_id"] = current_user.id
+    if request.date_from is not None:
+        filters["published_at_from"] = request.date_from
+    if request.date_to is not None:
+        filters["published_at_to"] = request.date_to
     return filters
 
 
@@ -121,10 +139,11 @@ async def run_ingest_task(
             "articles_collected": len(articles),
             "chunks_indexed": index_stats.get("chunks", 0),
             "records_inserted": index_stats.get("inserted", 0),
+            "finished_at": _time.time(),
         })
         logger.info("ingestion_completed", task_id=task_id, source=request.source, articles=len(articles))
     except Exception as e:
-        ingest_tasks[task_id].update({"status": "failed", "error": str(e)})
+        ingest_tasks[task_id].update({"status": "failed", "error": str(e), "finished_at": _time.time()})
         metrics_registry.increment("rag_ingest_trigger_errors_total")
         logger.error("ingest_task_failed", task_id=task_id, source=request.source, error=str(e))
 
@@ -382,6 +401,49 @@ async def ingest_trigger(
             source=body.source,
             message="数据采集失败",
         )
+
+
+@router.get("/ingest/task/{task_id}", response_model=IngestTaskResponse)
+async def ingest_task_status(task_id: str, current_user=Depends(get_current_user)):
+    """Get status of a specific ingestion task."""
+    task = ingest_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    # Only allow the task owner (or same company) to view status
+    user_id = getattr(current_user, "id", "")
+    company_id = getattr(current_user, "company_id", "")
+    if task.get("user_id") != user_id and task.get("company_id") != company_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return IngestTaskResponse(
+        task_id=task_id,
+        status=task["status"],
+        source=task.get("source"),
+        articles_collected=task.get("articles_collected", 0),
+        chunks_indexed=task.get("chunks_indexed", 0),
+        records_inserted=task.get("records_inserted", 0),
+        error=task.get("error"),
+    )
+
+
+@router.get("/ingest/tasks", response_model=list[IngestTaskResponse])
+async def ingest_task_list(current_user=Depends(get_current_user)):
+    """List active ingestion tasks for the current user/company."""
+    _cleanup_stale_tasks()
+    user_id = getattr(current_user, "id", "")
+    company_id = getattr(current_user, "company_id", "")
+    results = []
+    for tid, task in ingest_tasks.items():
+        if task.get("user_id") == user_id or task.get("company_id") == company_id:
+            results.append(IngestTaskResponse(
+                task_id=tid,
+                status=task["status"],
+                source=task.get("source"),
+                articles_collected=task.get("articles_collected", 0),
+                chunks_indexed=task.get("chunks_indexed", 0),
+                records_inserted=task.get("records_inserted", 0),
+                error=task.get("error"),
+            ))
+    return results
 
 
 @router.get("/ingest/status", response_model=IngestStatusResponse)

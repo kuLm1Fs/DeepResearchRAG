@@ -2,19 +2,38 @@
 
 English | [简体中文](README.md)
 
-RAG News Intelligence is a bilingual news RAG system for Chinese and English news. It supports multi-source collection, cleaning, embedding, hybrid retrieval, LangGraph Agent-powered Q&A, and source citations. The system is designed to handle 100K to 1M news articles on a 4-core / 15.6GB server.
+A bilingual news RAG system for Chinese and English. Supports multi-source collection, vectorization, hybrid retrieval, LangGraph Agent Q&A, and source citations. Designed to handle 100K–1M articles on a 4-core / 15.6GB server.
 
 ## Features
 
-- Multi-source ingestion: RSS, HN API, Reddit API, HuggingFace datasets, and custom crawlers.
-- Bilingual processing: Chinese and English cleaning, chunking, retrieval, and Q&A.
-- Hybrid retrieval: semantic vector search, Milvus FULLTEXT keyword search, and exact title matching.
-- RRF fusion: default `k=60` with weights `0.5 / 0.3 / 0.2`.
-- Agent workflow: LangGraph orchestration for query analysis, routing, retrieval evaluation, multi-source comparison, answer generation, and self-reflection.
-- Pluggable LLM providers: DeepSeek by default, with OpenAI and Qwen as fallbacks via `LLM_PROVIDER`.
-- Cloud embeddings: Volcengine Embedding API, 1024 dimensions, default batch size 50.
-- Observability: request-level `trace_id`, structured logs, sensitive value redaction, controlled debug mode, and optional LLM cache.
-- Full-stack app: FastAPI SSE streaming backend with a React / Vite / Tailwind frontend.
+### Data Collection & Processing
+- Multi-source ingestion: RSS, HN API, Reddit API, HuggingFace datasets, custom crawlers
+- Bilingual processing: Chinese/English cleaning, chunking (RecursiveCharacterTextSplitter, chunk_size=500), retrieval, and Q&A
+- Cloud embedding: Volcengine API, 1024 dimensions, batch size 50, auto-retry
+- Incremental dedup: SHA256 content_hash-based Milvus upserts
+
+### Retrieval & Generation
+- Hybrid retrieval: semantic vector search (COSINE), Milvus FULLTEXT keyword search, exact title match
+- RRF fusion: `k=60`, weights `0.5 / 0.3 / 0.2`
+- Time decay boosting: exponential decay based on `published_at` (configurable half-life)
+- Date range filtering: `date_from` / `date_to` query parameters
+- LangGraph Agent workflow: query analysis → routing → multi-path retrieval → evaluation → comparison → generation → self-reflection
+- Pluggable LLM: DeepSeek by default, OpenAI / Qwen via `LLM_PROVIDER`
+
+### Deep Research
+- Five-stage pipeline: Planner → Retriever → Analyst → Checker → Writer
+- Auto gap-filling: Checker triggers re-retrieval when gaps detected (up to 20 tool calls)
+- Quality reports: evidence coverage, source diversity, freshness, credibility issues, gap/conflict detection
+- PPT outline generation: automatic slide outline extraction from research reports
+- Real-time progress: SSE streaming of current step, execution logs, and intermediate results
+- Task cancellation: cancel running research tasks via API
+
+### Platform Capabilities
+- JWT auth: registration, login, token refresh, multi-device concurrency
+- Multi-tenancy: company_id-based data isolation and quota management
+- Audit logging: key operations (queries, ingestion, research) automatically logged
+- Request-level observability: `trace_id` propagation, structlog, sensitive value redaction
+- Full-stack: FastAPI SSE streaming + React / Vite / Tailwind frontend
 
 ## Tech Stack
 
@@ -27,88 +46,98 @@ RAG News Intelligence is a bilingual news RAG system for Chinese and English new
 | Vector DB | Milvus standalone + etcd + MinIO |
 | Structured Storage | PostgreSQL |
 | Frontend | React, TypeScript, Vite, Tailwind CSS |
+| Deployment | Docker / Docker Compose |
 
 ## Architecture
 
 ```text
-User query
-  -> FastAPI SSE API
+User Query
+  -> FastAPI SSE API (JWT auth + trace_id)
   -> LangGraph Agent
-      -> Query analysis
-      -> Route decision
+      -> Query analysis (LLM structured output)
+      -> Route decision (rules + LLM fallback)
       -> Multi-path retrieval
-          -> Semantic vector search
-          -> Keyword full-text search
+          -> Semantic vector search (COSINE)
+          -> Keyword full-text search (FULLTEXT)
           -> Exact title match
       -> RRF fusion
+      -> Time decay boosting
       -> Result evaluation
       -> Multi-source comparison
-      -> Answer generation
+      -> Answer generation (LLM)
       -> Self-reflection
   -> Streaming answer with source citations
+```
+
+Deep Research flow:
+
+```text
+Research Question
+  -> POST /api/research (async task creation)
+  -> Planner (decompose into sub-questions)
+  -> Retriever (multi-path retrieval)
+  -> Analyst (extract claims)
+  -> Checker (verify + gap detection)
+      -> Gaps found? Loop back to Retriever (up to N rounds)
+  -> Writer (generate report + PPT outline)
+  -> SSE real-time progress streaming
 ```
 
 ## Repository Layout
 
 ```text
 .
-├── backend/                 # FastAPI, LangGraph Agent, retrieval, ingestion, evaluation
+├── backend/                    # FastAPI backend
 │   ├── src/
-│   ├── scripts/
-│   ├── tests/
-│   ├── configs/.env.example
+│   │   ├── api/                # Routes, auth, models
+│   │   ├── agent/              # LangGraph Agent, Deep Research
+│   │   ├── retrieval/          # Hybrid retrieval, fusion, reranking
+│   │   ├── core/               # Logging, audit, rate limiting
+│   │   └── db/                 # PostgreSQL connection & models
+│   ├── tests/                  # pytest test suite
+│   ├── scripts/                # Data import, evaluation scripts
+│   ├── Dockerfile
 │   └── Makefile
-├── frontend/                # React + TypeScript frontend
-├── docker/                  # Milvus, etcd, MinIO, PostgreSQL
-├── docs/                    # Design docs, API docs, database schema
-├── scripts/                 # Project-level scripts
-└── README.md                # Chinese README
+├── frontend/                   # React + TypeScript frontend
+│   ├── src/
+│   │   ├── components/         # ChatWindow, ResearchPanel, IngestPanel, etc.
+│   │   ├── api/                # API client (token refresh, error handling)
+│   │   └── types/              # TypeScript type definitions
+│   └── Dockerfile
+├── docker/                     # Docker Compose infrastructure
+├── docs/                       # Design docs, deployment guide, database schema
+└── .github/                    # CI/CD workflows
 ```
-
-## Requirements
-
-- Python 3.10+
-- Node.js 18+
-- Docker / Docker Compose
-- A DeepSeek, OpenAI, or Qwen API key
-- A Volcengine Embedding API key
 
 ## Quick Start
 
-### 1. Start Infrastructure Services
+### 1. Start Infrastructure
 
 ```bash
 cd docker
 docker compose up -d
-docker compose ps
 ```
 
-This starts Milvus, etcd, MinIO, and PostgreSQL.
+Starts Milvus, etcd, MinIO, and PostgreSQL.
 
-### 2. Initialize PostgreSQL
-
-```bash
-cd docker
-docker exec -i $(docker compose ps -q postgres) \
-  psql -U rag_user -d rag_news < ../docs/schema.sql
-```
-
-If the database does not exist yet, create it first:
+### 2. Initialize Database
 
 ```bash
 cd docker
 docker exec -i $(docker compose ps -q postgres) \
   psql -U rag_user -c "CREATE DATABASE rag_news;"
+docker exec -i $(docker compose ps -q postgres) \
+  psql -U rag_user -d rag_news < ../docs/schema.sql
 ```
 
-### 3. Configure and Run the Backend
+### 3. Configure Backend
 
 ```bash
 cd backend
 cp configs/.env.example configs/.env.dev
 ```
 
-Edit `backend/configs/.env.dev` and provide at least:
+Edit `configs/.env.dev` with at least:
 
 ```bash
 DEEPSEEK_API_KEY=sk-xxx
@@ -117,23 +146,24 @@ LLM_PROVIDER=deepseek
 LLM_MODEL=deepseek-chat
 ```
 
-Install dependencies and start the development server:
+### 4. Start Backend
 
 ```bash
+cd backend
 make install
 make dev
 ```
 
-Or use uv directly:
+Or with uv:
 
 ```bash
 uv sync
-uv run uvicorn src.api.app:app --reload
+uv run uvicorn src.api.app:app --reload --app-dir src
 ```
 
-The backend API docs are available at http://localhost:8000/docs by default.
+API docs: http://localhost:8000/docs
 
-### 4. Run the Frontend
+### 5. Start Frontend
 
 ```bash
 cd frontend
@@ -141,97 +171,118 @@ npm install
 npm run dev
 ```
 
-The frontend dev server is available at http://localhost:5173 by default.
+Frontend: http://localhost:5173
 
-## Ingestion and Evaluation
+## Docker Deployment
 
-Import sample HuggingFace `ag_news` data:
-
-```bash
-cd backend
-python scripts/seed_data.py
-```
-
-Evaluate retrieval quality:
+Full Docker deployment guide: [docs/deployment.md](docs/deployment.md).
 
 ```bash
-cd backend
-python scripts/evaluate_retrieval.py
+cd docker
+docker compose up -d --build
+docker compose logs -f backend
 ```
 
-Evaluation output is written to `backend/data/eval_results/`. The target metric is `Precision@5 >= 0.8`.
+## API Endpoints
+
+### Authentication
+
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | `/api/auth/register` | Register (optional company_name) |
+| POST | `/api/auth/login` | Login, returns access + refresh tokens |
+| POST | `/api/auth/refresh` | Refresh access token |
+
+### Query & Retrieval
+
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | `/api/query` | SSE streaming Q&A, supports `date_from` / `date_to` |
+| GET | `/api/stats` | Data and system statistics |
+| GET | `/api/health` | Health check |
+
+### Data Ingestion
+
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | `/api/ingest/trigger` | Trigger data collection (returns task_id) |
+| GET | `/api/ingest/status` | Global ingestion status |
+| GET | `/api/ingest/task/{task_id}` | Query single task progress |
+| GET | `/api/ingest/tasks` | List all active tasks for current user |
+
+### Deep Research
+
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | `/api/research` | Create research task (async execution) |
+| GET | `/api/research/{task_id}` | Query task status and results |
+| GET | `/api/research/{task_id}/status` | Query current step progress |
+| GET | `/api/research/{task_id}/events` | SSE real-time progress stream |
+| POST | `/api/research/{task_id}/cancel` | Cancel a running task |
+
+See http://localhost:8000/docs (Swagger UI) for full details.
 
 ## Core Configuration
 
 | Variable | Description | Default |
 | --- | --- | --- |
 | `ENV` | Runtime environment | `dev` |
-| `DEBUG` | Enable debug mode | `true` |
-| `LLM_PROVIDER` | LLM provider: `deepseek`, `openai`, or `qwen` | `deepseek` |
+| `DEBUG` | Debug mode | `true` |
+| `LLM_PROVIDER` | LLM provider | `deepseek` |
 | `LLM_MODEL` | LLM model name | `deepseek-chat` |
 | `DEEPSEEK_API_KEY` | DeepSeek API key | - |
-| `OPENAI_API_KEY` | OpenAI API key | - |
-| `QWEN_API_KEY` | Qwen API key | - |
 | `VOLCENGINE_API_KEY` | Volcengine API key | - |
 | `MILVUS_HOST` | Milvus host | `localhost` |
 | `MILVUS_PORT` | Milvus port | `19530` |
 | `POSTGRES_HOST` | PostgreSQL host | `localhost` |
 | `POSTGRES_PORT` | PostgreSQL port | `5432` |
-| `LLM_CACHE` | Enable LLM response cache | `true` |
+| `JWT_SECRET` | JWT signing secret | - |
+| `LLM_CACHE` | LLM response cache | `true` |
 | `PROMPT_VERSION` | Prompt version | `v1` |
 
-Production mode forces debug capabilities such as `llm_cache`, `retrieval_dump`, and `debug` off.
+Production (`ENV=prod`) forces off: `llm_cache`, `retrieval_dump`, `debug`.
 
-## API
+## Development
 
-Main endpoints:
-
-- `POST /api/query`: SSE streaming Q&A endpoint.
-- `GET /api/stats`: data and system statistics.
-- Data management endpoints for article ingestion, status checks, and retrieval debugging.
-
-See `docs/api-docs.md` for more details.
-
-## Development Commands
-
-Backend:
+### Backend
 
 ```bash
 cd backend
-make install
-make dev
-make lint
-uv run pytest
+make install          # Install dependencies
+make dev              # Start dev server
+make lint             # Lint code
+uv run pytest         # Run tests (97 test cases)
 ```
 
-Frontend:
+### Frontend
 
 ```bash
 cd frontend
-npm run dev
-npm run build
+npm install           # Install dependencies
+npm run dev           # Dev server
+npm run build         # Production build
 ```
 
-Infrastructure:
+### Data Import & Evaluation
 
 ```bash
-cd docker
-docker compose up -d
-docker compose down
+cd backend
+python scripts/seed_data.py            # Import HuggingFace ag_news sample data
+python scripts/evaluate_retrieval.py   # Retrieval quality evaluation (target Precision@5 >= 0.8)
 ```
 
-## Prompts and Cache
+## Prompt Management
 
-Prompt templates live in `backend/src/agent/templates/` and are versioned by directory, such as `v1/` and `v2/`, with an optional `current` symlink. Select a prompt set at runtime through `PROMPT_VERSION`.
+Prompt templates live in `backend/src/agent/templates/`, versioned by directory (`v1/`, `v2/`), with a `current` symlink pointing to the active version. Select at runtime via `PROMPT_VERSION`.
 
-LLM response cache lives in `backend/data/llm_cache/{version}/`. Cache keys include the model, prompt version, and input content to make experiments easier to reproduce.
+LLM response cache lives in `backend/data/llm_cache/{version}/`. Cache keys include model, prompt version, and input for experiment reproducibility.
 
-## Observability and Safety
+## Observability
 
-- Every request gets a `trace_id`, propagated through the `X-Trace-ID` response header.
-- structlog is used for structured logging.
-- Logs redact sensitive patterns such as API keys.
-- Errors are split into ignorable and critical levels: empty retrievals can be logged and skipped, while Milvus outages or invalid API keys abort the request.
+- Every request gets a `trace_id`, propagated via `X-Trace-ID` header
+- structlog structured logging with automatic API key redaction
+- Error classification: ignorable errors (empty retrieval) log and continue; critical errors (Milvus down, invalid API key) abort the request
+- Audit logging for key operations (queries, ingestion, research tasks)
 
 ## License
 

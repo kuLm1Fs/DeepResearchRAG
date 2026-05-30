@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RAG News Intelligence 面试拷打题</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --paper: #ffffff;
+      --ink: #1f2937;
+      --muted: #667085;
+      --line: #d8dee8;
+      --accent: #2563eb;
+      --soft: #eef4ff;
+      --warn: #fff7ed;
+      --warn-line: #fed7aa;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.65;
+    }
+
+    .page {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 40px 24px 64px;
+    }
+
+    header {
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 760px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--paper);
+      color: #344054;
+      font-size: 13px;
+    }
+
+    .guide {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 24px 0 28px;
+    }
+
+    .guide-card {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .guide-card strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .guide-card span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      margin-bottom: 24px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(10px);
+    }
+
+    nav a {
+      display: inline-block;
+      margin: 4px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 13px;
+    }
+
+    nav a:hover {
+      background: var(--soft);
+    }
+
+    section {
+      margin: 24px 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--paper);
+      overflow: hidden;
+    }
+
+    .section-head {
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    h2 {
+      margin: 0 0 6px;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .section-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .questions {
+      padding: 4px 20px 20px;
+    }
+
+    .q {
+      padding: 16px 0;
+      border-bottom: 1px solid #edf0f5;
+    }
+
+    .q:last-child {
+      border-bottom: 0;
+    }
+
+    .q-title {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 10px;
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .num {
+      flex: 0 0 auto;
+      min-width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: var(--soft);
+      color: var(--accent);
+      text-align: center;
+      line-height: 28px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .hint {
+      margin: 8px 0 0 38px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .answer {
+      margin: 12px 0 0 38px;
+      min-height: 76px;
+      border: 1px dashed #cbd5e1;
+      border-radius: 8px;
+      background:
+        linear-gradient(#ffffff, #ffffff) padding-box,
+        repeating-linear-gradient(
+          to bottom,
+          transparent 0,
+          transparent 27px,
+          #eef2f7 28px
+        );
+    }
+
+    .answer::before {
+      content: "你的回答笔记";
+      display: block;
+      padding: 8px 10px;
+      color: #98a2b3;
+      font-size: 12px;
+    }
+
+    .sample {
+      margin: 14px 0 0 38px;
+      padding: 12px 14px;
+      border: 1px solid var(--warn-line);
+      border-radius: 8px;
+      background: var(--warn);
+      color: #7c2d12;
+      font-size: 13px;
+    }
+
+    .sample strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #9a3412;
+    }
+
+    footer {
+      margin-top: 32px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 760px) {
+      .page {
+        padding: 28px 14px 48px;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+
+      .guide {
+        grid-template-columns: 1fr;
+      }
+
+      nav {
+        position: static;
+      }
+
+      .answer,
+      .hint,
+      .sample {
+        margin-left: 0;
+      }
+    }
+
+    @media print {
+      body {
+        background: #ffffff;
+      }
+
+      .page {
+        max-width: none;
+        padding: 0;
+      }
+
+      nav {
+        display: none;
+      }
+
+      section,
+      .guide-card {
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <h1>RAG News Intelligence 面试拷打题</h1>
+      <p class="subtitle">
+        围绕简历中的 Deep Research Agent 项目设计。练习目标不是背答案，而是把项目讲成真实做过、有取舍、有边界、有证据的工程项目。
+      </p>
+      <div class="meta">
+        <span class="tag">Deep Research Agent</span>
+        <span class="tag">RAG 证据引擎</span>
+        <span class="tag">Supervisor + Multi-Agent</span>
+        <span class="tag">FastAPI / SSE</span>
+        <span class="tag">Milvus / PostgreSQL</span>
+      </div>
+    </header>
+
+    <div class="guide">
+      <div class="guide-card">
+        <strong>回答结构</strong>
+        <span>背景一句话，问题一句话，动作两三句，结果一句话。</span>
+      </div>
+      <div class="guide-card">
+        <strong>不要空泛</strong>
+        <span>少说“提升准确率”，多说召回、校验、补检、落库、重试。</span>
+      </div>
+      <div class="guide-card">
+        <strong>主动讲边界</strong>
+        <span>哪些已完成，哪些是增强计划，要能分清。</span>
+      </div>
+    </div>
+
+    <nav aria-label="题目导航">
+      <a href="#positioning">项目定位</a>
+      <a href="#retrieval">检索与证据</a>
+      <a href="#agent">Agent 编排</a>
+      <a href="#fastapi">FastAPI 服务化</a>
+      <a href="#state">状态与恢复</a>
+      <a href="#data">数据与认证</a>
+      <a href="#quality">质量评估</a>
+      <a href="#issues">真实问题</a>
+      <a href="#github">GitHub 可信度</a>
+    </nav>
+
+    <section id="positioning">
+      <div class="section-head">
+        <h2>一、项目定位</h2>
+        <p>先确认你是不是能把项目讲清楚，而不是堆技术名词。</p>
+      </div>
+      <div class="questions">
+        <div class="q">
+          <div class="q-title"><span class="num">1</span><span>你这个项目一句话怎么介绍？不要念简历，用你自己的话说。</span></div>
+          <p class="hint">考点：项目目标、用户、核心价值。别一上来讲 RRF、DAG、JWT。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">2</span><span>为什么叫 Deep Research Agent，而不是普通 RAG 系统？边界在哪里？</span></div>
+          <p class="hint">考点：普通问答 vs 研究任务。重点讲规划、证据、分析、校验、交付。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">3</span><span>真实用户是谁？产品经理、行业分析师具体拿它完成什么任务？</span></div>
+          <p class="hint">考点：业务场景是否真实，别只说“企业用户”。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">4</span><span>你说有 RAG 证据引擎、Agent 分析层、报告/PPT 交付层，这三层分别输入输出是什么？</span></div>
+          <p class="hint">考点：能不能画出清晰的数据流。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">5</span><span>如果现场画架构图，你会怎么画？用户输入问题后经过哪些模块？</span></div>
+          <p class="hint">考点：请求链路。建议按 User -> API -> Orchestrator -> Agents -> Storage -> Output 讲。</p>
+          <div class="answer"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="retrieval">
+      <div class="section-head">
+        <h2>二、检索与证据质量</h2>
+        <p>这是项目含金量最高的一组问题。回答好，面试官会觉得你不是 PDF QA demo。</p>
+      </div>
+      <div class="questions">
+        <div class="q">
+          <div class="q-title"><span class="num">1</span><span>RRF 的公式是什么？为什么不用简单加权平均分？</span></div>
+          <p class="hint">考点：不同召回链路分数尺度不同，RRF 用排名融合更稳定。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">2</span><span>语义召回、关键词召回、标题匹配分别解决什么问题？举一个一路失败另一路补上的例子。</span></div>
+          <p class="hint">考点：混合检索不是堆功能，而是各自弥补短板。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">3</span><span>你说考虑时间相近性，具体是检索前过滤，还是召回后加权？时间衰减怎么设计？</span></div>
+          <p class="hint">考点：metadata filter、recency score、业务新鲜度。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">4</span><span>多来源验证真实性是怎么做的？同一 claim 至少几个来源？source_type 怎么加权？</span></div>
+          <p class="hint">考点：来源可信度、官方博客/研究报告/新闻/社区的权重差异。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">5</span><span>如果 top 10 结果里 6 条来自同一个媒体，你会保留最高相关性，还是牺牲相关性换来源多样性？</span></div>
+          <p class="hint">考点：业务取舍。行业报告更需要多源覆盖，不能只看相似度。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">6</span><span>Precision@5 0.8+ 是怎么构造的？ground truth 怎么来？这个指标有什么局限？</span></div>
+          <p class="hint">考点：别把小评测说成学术 benchmark。要讲回归测试和人工标注边界。</p>
+          <div class="answer"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="agent">
+      <div class="section-head">
+        <h2>三、Multi-Agent 编排</h2>
+        <p>面试官会看你是真的理解 Agent 分工，还是只是把模块都叫 Agent。</p>
+      </div>
+      <div class="questions">
+        <div class="q">
+          <div class="q-title"><span class="num">1</span><span>Planner、Retriever、Analyst、Checker、Writer 五个子 Agent 分别做什么？为什么要拆成五个？</span></div>
+          <p class="hint">考点：职责边界，输入输出，拆分理由。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">2</span><span>Supervisor 怎么决定下一步调用哪个 Agent？是固定流程还是动态路由？</span></div>
+          <p class="hint">考点：固定主链路 + Checker 缺口触发补检。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">3</span><span>如果 Planner 子任务拆得太细或太粗，会出什么问题？你怎么控制粒度？</span></div>
+          <p class="hint">考点：你之前提到的颗粒度问题。细了依赖爆炸，粗了模型完不成。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">4</span><span>哪些任务可以并行，哪些必须串行？你怎么表达依赖关系？</span></div>
+          <p class="hint">考点：DAG 执行、同步/异步边界。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">5</span><span>如何防止 Agent 流程失控，比如重复检索、死循环、无限补检？</span></div>
+          <p class="hint">考点：MAX_TOOL_CALLS、retry_count、补检上限、状态机。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">6</span><span>LLM 输出 JSON 不稳定怎么办？如果多了一段解释文字，后续流程会不会挂？</span></div>
+          <p class="hint">考点：schema prompt、JSON 提取、校验、fallback。</p>
+          <div class="answer"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="fastapi">
+      <div class="section-head">
+        <h2>四、FastAPI 服务化</h2>
+        <p>回答要口语化。别像背文档，要讲“我怎么把长流程 Agent 包成前端能用的服务”。</p>
+      </div>
+      <div class="questions">
+        <div class="q">
+          <div class="q-title"><span class="num">1</span><span>FastAPI 在你这个项目里主要做了什么？</span></div>
+          <p class="hint">考点：不只是写接口，而是任务创建、认证、SSE、状态查询、历史、重试。</p>
+          <div class="sample">
+            <strong>口语化方向</strong>
+            FastAPI 主要是服务入口。Deep Research 不是问一句马上回一句，所以我先创建任务拿 task_id，再用 SSE 推每一步进度。
+          </div>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">2</span><span>Deep Research 是长任务，你为什么不做成一个同步接口直接等结果？</span></div>
+          <p class="hint">考点：用户体验、超时、可观测性、失败定位。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">3</span><span>为什么用 SSE，不用 WebSocket 或轮询？</span></div>
+          <p class="hint">考点：后端单向推送，SSE 轻量，WebSocket 留给双向协作场景。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">4</span><span>SSE 推哪些事件？前端怎么展示 Planner 到 Writer 的进度？</span></div>
+          <p class="hint">考点：step_started、step_done、log、error、done。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">5</span><span>FastAPI 项目结构怎么拆？api 层有没有堆业务逻辑？</span></div>
+          <p class="hint">考点：api、agent/orchestrator、retrieval、vectorstore、db、llm 分层。</p>
+          <div class="answer"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="state">
+      <div class="section-head">
+        <h2>五、任务状态、失败恢复与扩展性</h2>
+        <p>这是 FastAPI 之后最自然的追问。重点是任务执行和进度展示分离。</p>
+      </div>
+      <div class="questions">
+        <div class="q">
+          <div class="q-title"><span class="num">1</span><span>任务执行期间状态存在哪里？哪些在内存，哪些落库？</span></div>
+          <p class="hint">考点：Working Memory vs research_tasks。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">2</span><span>服务重启后，内存里的 Working Memory 没了怎么办？</span></div>
+          <p class="hint">考点：当前边界。先保证结果/失败位置可恢复，完整中间态可后续落 research_steps。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">3</span><span>SSE 连接断了，任务会不会中断？前端怎么恢复？</span></div>
+          <p class="hint">考点：SSE 只是展示通道，任务通过 task_id 和数据库状态恢复。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">4</span><span>某个子 Agent 失败怎么办？是整条任务失败，还是支持单步重试？</span></div>
+          <p class="hint">考点：failed_step、retry_count、fallback、retry endpoint。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">5</span><span>为什么不用 Celery 或任务队列？如果任务量上来怎么扩展？</span></div>
+          <p class="hint">考点：当前阶段验证流程，生产化迁移 Worker 队列。</p>
+          <div class="answer"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="data">
+      <div class="section-head">
+        <h2>六、数据、认证与多用户隔离</h2>
+        <p>这里看你是不是把项目从个人 demo 往 ToB 应用思考过。</p>
+      </div>
+      <div class="questions">
+        <div class="q">
+          <div class="q-title"><span class="num">1</span><span>PostgreSQL 里核心表有哪些？各自解决什么问题？</span></div>
+          <p class="hint">考点：companies、users、research_tasks、user_preferences、refresh_tokens、audit_logs。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">2</span><span>为什么 research_tasks 放 PostgreSQL，而不是 Redis？</span></div>
+          <p class="hint">考点：业务数据需要历史、恢复、导出；Redis 更适合缓存和限流。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">3</span><span>JWT access token 和 refresh token 怎么设计？refresh token 为什么不直接明文存？</span></div>
+          <p class="hint">考点：access 短期，refresh 长期，数据库存 hash，支持 revoke。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">4</span><span>company_id 和 user_id 数据隔离在哪里做？只靠前端传参安全吗？</span></div>
+          <p class="hint">考点：FastAPI dependency 从 token 注入上下文，后端强制过滤。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">5</span><span>用户偏好怎么进入 Agent 流程？比如报告语言、风格、时间范围。</span></div>
+          <p class="hint">考点：User Memory -> Planner prompt 注入。</p>
+          <div class="answer"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="quality">
+      <div class="section-head">
+        <h2>七、报告质量与幻觉控制</h2>
+        <p>这是你最该主讲的项目难点。不要只讲“用了 prompt”。</p>
+      </div>
+      <div class="questions">
+        <div class="q">
+          <div class="q-title"><span class="num">1</span><span>业务分析报告里，LLM 幻觉具体体现在哪些地方？</span></div>
+          <p class="hint">考点：编数据、混淆来源、过度推断、忽略时效、没有缺口声明。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">2</span><span>Checker Agent 检查哪些指标？每个指标怎么计算？</span></div>
+          <p class="hint">考点：证据覆盖率、来源多样性、时效性、可信度、缺口识别。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">3</span><span>如果 Checker 发现证据不足，Supervisor 怎么处理？</span></div>
+          <p class="hint">考点：触发补检，或者报告中标注证据不足，不要硬写结论。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">4</span><span>Preset 预设分析环节解决什么问题？为什么它能减少幻觉？</span></div>
+          <p class="hint">考点：先声明分析边界、可信来源优先级、已知未知和截止时间。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">5</span><span>Markdown 报告和 PPT JSON 交付如何保证每页都有来源？</span></div>
+          <p class="hint">考点：writer 输出 sources / evidence_ids，前端可渲染引用。</p>
+          <div class="answer"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="issues">
+      <div class="section-head">
+        <h2>八、真实开发问题</h2>
+        <p>从 issues 里挑能体现工程判断的问题讲。别主讲依赖没装这种小坑。</p>
+      </div>
+      <div class="questions">
+        <div class="q">
+          <div class="q-title"><span class="num">1</span><span>refresh token 为什么不能用 bcrypt 哈希？你最后怎么处理？</span></div>
+          <p class="hint">考点：bcrypt 72 字节限制；refresh token 是高熵签名 token，存 SHA256 hash 防泄露。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">2</span><span>SQLAlchemy async 下 `default=func.now()` 为什么会出问题？为什么改成 `server_default`？</span></div>
+          <p class="hint">考点：Python 端默认 vs 数据库端默认。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">3</span><span>timezone-aware 和 timezone-naive datetime 混用会造成什么问题？你怎么统一？</span></div>
+          <p class="hint">考点：认证过期时间比较，统一 naive UTC 或统一 timezone-aware。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">4</span><span>PostgreSQL 连接和 pg_hba.conf 问题可以怎么讲，才不像单纯配环境？</span></div>
+          <p class="hint">考点：部署环境差异、远程访问、安全配置、连接排查链路。</p>
+          <div class="answer"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="github">
+      <div class="section-head">
+        <h2>九、GitHub 可信度与项目边界</h2>
+        <p>面试官会警惕“文档宏大，代码没落地”。你要主动讲证据。</p>
+      </div>
+      <div class="questions">
+        <div class="q">
+          <div class="q-title"><span class="num">1</span><span>如果我看你的 GitHub，怎么判断这不是一个玩具项目？</span></div>
+          <p class="hint">考点：可运行 demo、报告样例、评测结果、README、架构图、真实接口。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">2</span><span>你简历里写的能力，哪些已经跑通？哪些是设计或后续增强？</span></div>
+          <p class="hint">考点：边界诚实。不要把 todo 当已完成乱讲。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">3</span><span>如果我让你现场 demo，你会演示哪条最短链路？</span></div>
+          <p class="hint">考点：输入开放问题 -> 进度 -> 证据 -> 报告 -> PPT JSON。</p>
+          <div class="answer"></div>
+        </div>
+        <div class="q">
+          <div class="q-title"><span class="num">4</span><span>这个项目最容易被质疑“过度架构”的地方是什么？你怎么解释取舍？</span></div>
+          <p class="hint">考点：不是为了堆概念，而是围绕证据可信、长任务、ToB 多用户倒推出来。</p>
+          <div class="answer"></div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      练习建议：每次只练 3 个问题，先讲顺，再追求细节。面试里自然一点，比完整背诵更重要。
+    </footer>
+  </main>
+</body>
+</html>

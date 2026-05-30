@@ -1,10 +1,14 @@
 """Audit log helper — non-blocking writes to audit_logs table."""
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import insert
 
-from db import AuditLog, get_db_session
 from .logging import get_logger
+
+if TYPE_CHECKING:
+    pass  # db imports deferred to avoid circular import
 
 logger = get_logger(__name__)
 
@@ -21,6 +25,9 @@ async def write_audit_log(
     details: dict[str, Any] | None = None,
 ) -> None:
     """Insert an audit log row. Designed to be called as a FastAPI background task."""
+    # Lazy import to break circular dependency: core → db → core
+    from db import AuditLog, get_db_session
+
     try:
         async with get_db_session() as db:
             await db.execute(

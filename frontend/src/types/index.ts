@@ -16,6 +16,8 @@ export interface QueryRequest {
   language?: string
   category?: string
   stream?: boolean
+  date_from?: number  // epoch seconds
+  date_to?: number    // epoch seconds
 }
 
 // 查询响应类型
@@ -78,6 +80,17 @@ export interface IngestTriggerResponse {
   records_inserted?: number
 }
 
+// 数据导入任务状态响应类型
+export interface IngestTaskResponse {
+  task_id: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | string
+  source: string | null
+  articles_collected: number
+  chunks_indexed: number
+  records_inserted: number
+  error?: string | null
+}
+
 // 数据导入状态响应类型
 export interface IngestStatusResponse {
   total_articles: number
@@ -134,4 +147,17 @@ export interface ResearchTaskResponse {
   quality_report?: Record<string, unknown>
   execution_log?: Array<{ step: string; status: string; tool_call_count?: number }>
   sources_used?: number
+  evidence_trace?: Array<{
+    evidence_id: string
+    title: string
+    source: string
+    url?: string
+    published_at?: number
+    score?: number
+    snippet?: string
+  }>
+  gaps_identified?: string[]
+  conflicts_detected?: Array<{ claim: string; sources: string[] }>
+  error_message?: string
+  result_summary?: string
 }

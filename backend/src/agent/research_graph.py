@@ -12,6 +12,20 @@ from .research_memory import assemble_research_memory, build_evidence_trace, bui
 logger = get_logger(__name__)
 
 
+class TaskCancelledError(Exception):
+    """Raised when a research task has been cancelled by the user."""
+    pass
+
+
+def is_task_cancelled(task_id: str) -> bool:
+    """Check if a task has been cancelled via the API."""
+    try:
+        from ..api.research import _cancelled_tasks
+        return task_id in _cancelled_tasks
+    except ImportError:
+        return False
+
+
 async def notify_step(state: ResearchState, step: str) -> None:
     callback = state.get("on_step")
     if callback is None:
@@ -78,6 +92,7 @@ def create_research_graph():
 
 async def run_research(
     query: str,
+    task_id: str = "",
     user_id: str | None = None,
     company_id: str | None = None,
     on_step=None,
@@ -88,6 +103,7 @@ async def run_research(
 
     Args:
         query (str): 用户问题
+        task_id (str): 任务 ID（用于取消检查）
         user_id (str, optional): 用户 ID
         company_id (str, optional): 公司 ID
 
@@ -97,7 +113,7 @@ async def run_research(
     graph = create_research_graph()
     initial_state: ResearchState = {
         "query": query,
-        "task_id": "",
+        "task_id": task_id,
         "user_id": user_id or "",
         "company_id": company_id,
         "current_step": "planner",
@@ -128,7 +144,15 @@ async def run_research(
 
 
 # ---- Tool 调用包装 ----
+def _check_cancelled(state: ResearchState) -> None:
+    """Raise TaskCancelledError if the task has been cancelled."""
+    task_id = state.get("task_id")
+    if task_id and is_task_cancelled(task_id):
+        raise TaskCancelledError(f"Task {task_id} cancelled by user")
+
+
 async def _planner_node(state: ResearchState) -> dict:
+    _check_cancelled(state)
     await notify_step(state, "planner")
     plan = await _call_planner(state)
     sub_questions = plan.get("sub_questions") or plan.get("research_questions") or []
@@ -165,11 +189,13 @@ async def _call_retriever(state: ResearchState) -> dict:
 
 
 async def _retriever_node(state: ResearchState) -> dict:
+    _check_cancelled(state)
     await notify_step(state, "retriever")
     return await _call_retriever(state)
 
 
 async def _analyst_node(state: ResearchState) -> dict:
+    _check_cancelled(state)
     await notify_step(state, "analyst")
     return {
         "current_step": "analyst",
@@ -190,6 +216,7 @@ async def _call_checker(state: ResearchState) -> dict:
 
 
 async def _checker_node(state: ResearchState) -> dict:
+    _check_cancelled(state)
     await notify_step(state, "checker")
     check_result = await _call_checker(state)
     return {
@@ -207,6 +234,7 @@ async def _checker_node(state: ResearchState) -> dict:
 
 
 async def _writer_node(state: ResearchState) -> dict:
+    _check_cancelled(state)
     await notify_step(state, "writer")
     final_output = await _call_writer(state)
     next_state = dict(state)

@@ -43,6 +43,14 @@ def build_filter_expr(filters: dict[str, Any] | None) -> str | None:
             continue
         clauses.append(f'{field} == "{escape_milvus_string_value(value)}"')
 
+    # Range filters for published_at (epoch seconds)
+    date_from = filters.get("published_at_from")
+    date_to = filters.get("published_at_to")
+    if date_from is not None:
+        clauses.append(f"published_at >= {int(date_from)}")
+    if date_to is not None:
+        clauses.append(f"published_at <= {int(date_to)}")
+
     return " and ".join(clauses) if clauses else None
 
 
@@ -246,5 +254,12 @@ class MultiPathRetriever:
                 continue
             if "company_id" in filters and r.get("company_id") != filters["company_id"]:
                 continue
+            # Range filter for published_at
+            published_at = r.get("published_at")
+            if published_at is not None:
+                if "published_at_from" in filters and published_at < filters["published_at_from"]:
+                    continue
+                if "published_at_to" in filters and published_at > filters["published_at_to"]:
+                    continue
             filtered.append(r)
         return filtered
