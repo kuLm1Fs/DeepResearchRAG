@@ -35,6 +35,7 @@ class QueryResponse(BaseModel):
 
 class StatsResponse(BaseModel):
     total_articles: int
+    total_chunks: int
     sources: dict[str, int]
     categories: dict[str, int]
     languages: dict[str, int]
@@ -150,3 +151,25 @@ class UserResponse(BaseModel):
 # --- 通用错误 ---
 class ErrorResponse(BaseModel):
     detail: str
+
+
+# --- Feedback ---
+class FeedbackRequest(BaseModel):
+    query_id: str | None = Field(default=None, description="Trace ID of the query")
+    query_text: str | None = Field(default=None, max_length=2048)
+    rating: str = Field(..., pattern="^(positive|negative)$")
+    reason: str | None = Field(default=None, max_length=64, description="e.g. irrelevant, outdated, wrong, incomplete")
+    comment: str | None = Field(default=None, max_length=1024)
+
+
+class FeedbackResponse(BaseModel):
+    id: int
+    message: str = "Feedback recorded"
+
+
+class FeedbackStatsResponse(BaseModel):
+    total: int
+    positive: int
+    negative: int
+    satisfaction_rate: float
+    top_negative_reasons: dict[str, int]

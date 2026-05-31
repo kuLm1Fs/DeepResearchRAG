@@ -10,7 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 from core import get_logger, settings, write_audit_log, RAGError
 from core.metrics import metrics_registry
 from db import Company, check_connection, get_db_session
-from db.models import IngestTask
+from db.models import Feedback, IngestTask
 from retrieval.retriever import build_filter_expr
 from vectorstore import MilvusStore
 
@@ -19,6 +19,9 @@ from .auth import get_current_user
 from .auth import router as auth_router
 from .models import (
     Citation,
+    FeedbackRequest,
+    FeedbackResponse,
+    FeedbackStatsResponse,
     HealthResponse,
     IngestStatusResponse,
     IngestTaskResponse,
@@ -537,6 +540,73 @@ async def ingest_status(current_user=Depends(get_current_user)):
         logger.error("ingest_status_failed", error=str(e))
         metrics_registry.increment("rag_ingest_status_errors_total")
         raise HTTPException(status_code=503, detail="Ingest status service unavailable") from e
+
+
+@router.post("/feedback", response_model=FeedbackResponse)
+async def submit_feedback(
+    body: FeedbackRequest,
+    current_user=Depends(get_current_user),
+):
+    """Submit user feedback on a query answer."""
+    user_id = getattr(current_user, "id", "")
+    company_id = getattr(current_user, "company_id", None)
+
+    async with get_db_session() as db:
+        fb = Feedback(
+            query_id=body.query_id,
+            query_text=body.query_text,
+            rating=body.rating,
+            reason=body.reason,
+            comment=body.comment,
+            user_id=user_id,
+            company_id=company_id,
+        )
+        db.add(fb)
+        await db.commit()
+        await db.refresh(fb)
+
+    metrics_registry.increment(f"rag_feedback_{body.rating}_total")
+    logger.info("feedback_submitted", rating=body.rating, reason=body.reason, user_id=user_id)
+
+    return FeedbackResponse(id=fb.id)
+
+
+@router.get("/feedback/stats", response_model=FeedbackStatsResponse)
+async def get_feedback_stats(current_user=Depends(get_current_user)):
+    """Get aggregated feedback statistics for the current company."""
+    company_id = getattr(current_user, "company_id", None)
+    user_id = getattr(current_user, "id", "")
+
+    async with get_db_session() as db:
+        # Scope to company if available, otherwise user
+        if company_id:
+            result = await db.execute(
+                select(Feedback).where(Feedback.company_id == company_id)
+            )
+        else:
+            result = await db.execute(
+                select(Feedback).where(Feedback.user_id == user_id)
+            )
+        feedbacks = result.scalars().all()
+
+    total = len(feedbacks)
+    positive = sum(1 for f in feedbacks if f.rating == "positive")
+    negative = total - positive
+    rate = positive / total if total > 0 else 0.0
+
+    # Count negative reasons
+    reasons: dict[str, int] = {}
+    for f in feedbacks:
+        if f.rating == "negative" and f.reason:
+            reasons[f.reason] = reasons.get(f.reason, 0) + 1
+
+    return FeedbackStatsResponse(
+        total=total,
+        positive=positive,
+        negative=negative,
+        satisfaction_rate=round(rate, 4),
+        top_negative_reasons=dict(sorted(reasons.items(), key=lambda x: -x[1])[:5]),
+    )
 
 
 @router.get("/metrics", response_class=PlainTextResponse)

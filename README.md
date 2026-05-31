@@ -1,13 +1,13 @@
-# RAG News Intelligence
+# RAG Finance Intelligence
 
 [English](README.en.md) | 简体中文
 
-面向新闻场景的双语 RAG 系统，支持中英文新闻采集、向量化、多路检索、LangGraph Agent 问答和来源引用。目标是在 4 核 / 15.6GB 服务器上稳定处理 10 万到 100 万篇文章。
+面向金融场景的双语 RAG 系统，支持中英文金融资讯采集、向量化、多路检索、LangGraph Agent 问答和来源引用。目标是在 4 核 / 15.6GB 服务器上稳定处理 10 万到 100 万篇金融文档。
 
 ## 功能特性
 
 ### 数据采集与处理
-- 多源新闻采集：RSS、HN API、Reddit API、HuggingFace 数据集、自定义爬虫
+- 多源金融数据采集：财经 RSS、SEC 公告、金融新闻 API、HuggingFace 金融数据集
 - 双语内容处理：中英文清洗、切块（RecursiveCharacterTextSplitter, chunk_size=500）、检索与问答
 - 云端 Embedding：火山引擎 API，维度 1024，批量大小 50，自动重试
 - 增量去重：基于 content_hash（SHA256）的 Milvus 增量写入
@@ -34,6 +34,13 @@
 - 审计日志：关键操作（查询、导入、研究）自动记录
 - 请求级可观测性：`trace_id` 全链路传播、structlog 结构化日志、敏感信息脱敏
 - 前后端一体：FastAPI SSE 流式接口 + React / Vite / Tailwind 前端
+- 在线反馈：用户满意度追踪（thumbs up/down + 原因标签）
+
+### 评估体系
+- 检索质量：Precision@K, Recall@K, NDCG@K（K=1,3,5,10）
+- 端到端评估：LLM-as-Judge（Faithfulness + Relevance 1-5 分）
+- 引用覆盖率：每条 claim 是否有 supported citation
+- 按难度分层分析：easy / medium / hard 查询分别统计
 
 ## 技术栈
 
@@ -65,7 +72,7 @@
       -> 结果评估
       -> 多源对比
       -> 答案生成（LLM）
-      -> 自反思
+      -> 自反思 + 引用绑定
   -> 带来源引用的流式回答
 ```
 
@@ -91,13 +98,19 @@ Deep Research 流程：
 │   ├── src/
 │   │   ├── api/                # 路由、认证、模型
 │   │   ├── agent/              # LangGraph Agent、Deep Research
+│   │   ├── auth/               # JWT 认证
+│   │   ├── core/               # 日志、审计、限流、配置
+│   │   ├── db/                 # PostgreSQL 连接与模型
+│   │   ├── eval/               # LLM-as-Judge 评估模块
+│   │   ├── ingestion/          # 数据采集器（RSS、HN、HuggingFace）
+│   │   ├── llm/                # LLM 抽象层
 │   │   ├── retrieval/          # 多路召回、融合、重排序
-│   │   ├── core/               # 日志、审计、限流
-│   │   └── db/                 # PostgreSQL 连接与模型
-│   ├── tests/                  # pytest 测试套件
+│   │   └── vectorstore/        # Milvus 存储、Embedding
 │   ├── scripts/                # 数据导入、评估脚本
-│   ├── Dockerfile
-│   └── Makefile
+│   ├── data/                   # 评测集、评估结果
+│   ├── tests/                  # pytest 测试套件
+│   ├── migrations/             # SQL 迁移
+│   └── Dockerfile
 ├── frontend/                   # React + TypeScript 前端
 │   ├── src/
 │   │   ├── components/         # ChatWindow, ResearchPanel, IngestPanel 等
@@ -105,7 +118,7 @@ Deep Research 流程：
 │   │   └── types/              # TypeScript 类型定义
 │   └── Dockerfile
 ├── docker/                     # Docker Compose 基础设施
-├── docs/                       # 设计文档、部署文档、数据库 schema
+├── docs/                       # 设计文档、部署文档
 └── .github/                    # CI/CD 工作流
 ```
 
@@ -223,6 +236,13 @@ docker compose logs -f backend
 | GET | `/api/research/{task_id}/events` | SSE 实时进度流 |
 | POST | `/api/research/{task_id}/cancel` | 取消运行中的任务 |
 
+### 反馈
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/feedback` | 提交用户反馈（thumbs up/down + 原因） |
+| GET | `/api/feedback/stats` | 反馈统计数据 |
+
 更多细节见 http://localhost:8000/docs（Swagger UI）。
 
 ## 核心配置
@@ -254,7 +274,7 @@ cd backend
 make install          # 安装依赖
 make dev              # 启动开发服务器
 make lint             # 代码检查
-uv run pytest         # 运行测试（97 个用例）
+uv run pytest         # 运行测试
 ```
 
 ### 前端
@@ -270,8 +290,17 @@ npm run build         # 生产构建
 
 ```bash
 cd backend
-python scripts/seed_data.py            # 导入 HuggingFace ag_news 样本数据
-python scripts/evaluate_retrieval.py   # 检索质量评估（目标 Precision@5 >= 0.8）
+# 导入金融数据
+python scripts/seed_data.py --limit 10000
+python scripts/import_rss_pipeline.py
+
+# 检索质量评估
+PYTHONPATH=src python scripts/evaluate_retrieval.py
+# 目标: Precision@5 >= 0.8
+
+# 端到端评估（检索 + 答案质量 + 引用覆盖率）
+PYTHONPATH=src python scripts/evaluate_e2e.py --limit 5
+# 目标: keyword_hit_rate >= 0.7, faithfulness >= 3.5, relevance >= 3.5
 ```
 
 ## Prompt 管理

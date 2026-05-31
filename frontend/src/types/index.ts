@@ -7,6 +7,8 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   isError?: boolean
+  traceId?: string
+  feedback?: 'positive' | 'negative'
 }
 
 // 查询请求类型
@@ -160,4 +162,20 @@ export interface ResearchTaskResponse {
   conflicts_detected?: Array<{ claim: string; sources: string[] }>
   error_message?: string
   result_summary?: string
+}
+
+export interface FeedbackRequest {
+  query_id?: string
+  query_text?: string
+  rating: 'positive' | 'negative'
+  reason?: string
+  comment?: string
+}
+
+export interface FeedbackStatsResponse {
+  total: number
+  positive: number
+  negative: number
+  satisfaction_rate: number
+  top_negative_reasons: Record<string, number>
 }

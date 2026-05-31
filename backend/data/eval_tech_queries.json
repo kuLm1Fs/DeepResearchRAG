@@ -1,0 +1,357 @@
+{
+  "version": 2,
+  "domain": "tech",
+  "description": "Tech-focused evaluation dataset for RAG retrieval + answer quality",
+  "queries": [
+    {
+      "id": "tech-001",
+      "query": "What are the latest developments in large language models?",
+      "language": "en",
+      "expected_keywords": ["LLM", "GPT", "language model", "training", "transformer"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "tech-002",
+      "query": "How are diffusion models being used in image generation?",
+      "language": "en",
+      "expected_keywords": ["diffusion", "image", "generation", "stable diffusion", "DALL-E"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-003",
+      "query": "What is RLHF and why is it important for AI alignment?",
+      "language": "en",
+      "expected_keywords": ["RLHF", "reinforcement learning", "human feedback", "alignment", "reward model"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-004",
+      "query": "What progress has been made in multimodal AI systems?",
+      "language": "en",
+      "expected_keywords": ["multimodal", "vision", "text", "image", "GPT-4V"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-005",
+      "query": "How is AI being applied to drug discovery and healthcare?",
+      "language": "en",
+      "expected_keywords": ["drug", "medical", "healthcare", "clinical", "protein"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-006",
+      "query": "What are the concerns around AI deepfakes and misinformation?",
+      "language": "en",
+      "expected_keywords": ["deepfake", "misinformation", "detection", "synthetic", "regulation"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "tech-007",
+      "query": "How are companies deploying AI agents for automation?",
+      "language": "en",
+      "expected_keywords": ["AI agent", "automation", "workflow", "autonomous", "tool use"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-008",
+      "query": "What is the current state of open source vs proprietary AI models?",
+      "language": "en",
+      "expected_keywords": ["open source", "Llama", "Mistral", "proprietary", "model"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-009",
+      "query": "How is vector database technology evolving for AI applications?",
+      "language": "en",
+      "expected_keywords": ["vector", "embedding", "database", "similarity", "search"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-010",
+      "query": "What are the latest AI chip and hardware developments?",
+      "language": "en",
+      "expected_keywords": ["GPU", "chip", "NVIDIA", "TPU", "hardware", "inference"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "tech-011",
+      "query": "What are the biggest cybersecurity breaches this year?",
+      "language": "en",
+      "expected_keywords": ["breach", "cyberattack", "data leak", "ransomware", "vulnerability"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "tech-012",
+      "query": "How are zero-day vulnerabilities being discovered and patched?",
+      "language": "en",
+      "expected_keywords": ["zero-day", "vulnerability", "patch", "CVE", "exploit"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-013",
+      "query": "What is the impact of ransomware attacks on critical infrastructure?",
+      "language": "en",
+      "expected_keywords": ["ransomware", "infrastructure", "attack", "payment", "recovery"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-014",
+      "query": "How is supply chain security being addressed in software development?",
+      "language": "en",
+      "expected_keywords": ["supply chain", "SBOM", "dependency", "security", "audit"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-015",
+      "query": "What are the latest trends in cloud-native security?",
+      "language": "en",
+      "expected_keywords": ["cloud", "security", "container", "Kubernetes", "zero trust"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-016",
+      "query": "How are companies handling API security and authentication?",
+      "language": "en",
+      "expected_keywords": ["API", "authentication", "OAuth", "token", "security"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-017",
+      "query": "What is the state of passwordless authentication adoption?",
+      "language": "en",
+      "expected_keywords": ["passwordless", "passkey", "FIDO", "biometric", "authentication"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-018",
+      "query": "How is Kubernetes being used for workload orchestration?",
+      "language": "en",
+      "expected_keywords": ["Kubernetes", "container", "orchestration", "deployment", "cluster"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "tech-019",
+      "query": "What are the benefits and challenges of serverless computing?",
+      "language": "en",
+      "expected_keywords": ["serverless", "Lambda", "function", "cold start", "event"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-020",
+      "query": "How is edge computing changing data processing architectures?",
+      "language": "en",
+      "expected_keywords": ["edge", "latency", "IoT", "processing", "5G"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-021",
+      "query": "What is the current state of WebAssembly adoption?",
+      "language": "en",
+      "expected_keywords": ["WebAssembly", "WASM", "browser", "performance", "compilation"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-022",
+      "query": "How are observability platforms evolving for microservices?",
+      "language": "en",
+      "expected_keywords": ["observability", "tracing", "monitoring", "microservice", "OpenTelemetry"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-023",
+      "query": "What are the latest developments in database technology?",
+      "language": "en",
+      "expected_keywords": ["database", "SQL", "NoSQL", "NewSQL", "distributed"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-024",
+      "query": "How is platform engineering different from DevOps?",
+      "language": "en",
+      "expected_keywords": ["platform engineering", "DevOps", "IDP", "developer experience", "automation"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-025",
+      "query": "What progress has been made in quantum computing hardware?",
+      "language": "en",
+      "expected_keywords": ["quantum", "qubit", "superconducting", "error correction", "IBM", "Google"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-026",
+      "query": "How is the GPU shortage affecting AI development?",
+      "language": "en",
+      "expected_keywords": ["GPU", "shortage", "NVIDIA", "supply", "training", "compute"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "tech-027",
+      "query": "What are the latest advances in chip manufacturing processes?",
+      "language": "en",
+      "expected_keywords": ["TSMC", "nanometer", "process", "wafer", "EUV", "Samsung"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-028",
+      "query": "How is RISC-V architecture gaining traction?",
+      "language": "en",
+      "expected_keywords": ["RISC-V", "open source", "ISA", "processor", "architecture"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-029",
+      "query": "What is the future of autonomous vehicle technology?",
+      "language": "en",
+      "expected_keywords": ["autonomous", "self-driving", "lidar", "sensor", "Waymo", "Tesla"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "tech-030",
+      "query": "How are AR and VR technologies being applied beyond gaming?",
+      "language": "en",
+      "expected_keywords": ["AR", "VR", "mixed reality", "enterprise", "training", "Meta"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-031",
+      "query": "What are the trends in programming language popularity?",
+      "language": "en",
+      "expected_keywords": ["Python", "Rust", "Go", "TypeScript", "language", "ranking"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "tech-032",
+      "query": "How is Rust being adopted in systems programming?",
+      "language": "en",
+      "expected_keywords": ["Rust", "memory safety", "systems", "Linux", "performance"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-033",
+      "query": "What are the best practices for API design in 2025?",
+      "language": "en",
+      "expected_keywords": ["API", "REST", "GraphQL", "design", "versioning"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-034",
+      "query": "How is CI/CD evolving with AI-assisted development?",
+      "language": "en",
+      "expected_keywords": ["CI/CD", "pipeline", "automation", "deployment", "testing"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-035",
+      "query": "What is the state of developer tooling and IDE innovation?",
+      "language": "en",
+      "expected_keywords": ["IDE", "developer", "tool", "Copilot", "AI coding", "VS Code"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-036",
+      "query": "How are microservices patterns changing in enterprise architecture?",
+      "language": "en",
+      "expected_keywords": ["microservice", "architecture", "monolith", "event-driven", "gRPC"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-037",
+      "query": "What are the implications of the EU AI Act for tech companies?",
+      "language": "en",
+      "expected_keywords": ["AI Act", "regulation", "EU", "compliance", "risk"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-038",
+      "query": "大模型技术的最新进展是什么？",
+      "language": "zh",
+      "expected_keywords": ["大模型", "LLM", "语言模型", "训练", "推理"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "tech-039",
+      "query": "自动驾驶技术目前发展到什么阶段了？",
+      "language": "zh",
+      "expected_keywords": ["自动驾驶", "无人车", "L4", "传感器", "激光雷达"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "tech-040",
+      "query": "国产芯片产业的最新动态有哪些？",
+      "language": "zh",
+      "expected_keywords": ["芯片", "半导体", "国产", "光刻", "制程"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-041",
+      "query": "云计算市场格局发生了哪些变化？",
+      "language": "zh",
+      "expected_keywords": ["云计算", "AWS", "阿里云", "市场份额", "IaaS"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-042",
+      "query": "人工智能在医疗健康领域有哪些应用？",
+      "language": "zh",
+      "expected_keywords": ["AI", "医疗", "诊断", "影像", "药物"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-043",
+      "query": "数据安全和个人隐私保护有哪些新政策？",
+      "language": "zh",
+      "expected_keywords": ["数据安全", "隐私", "GDPR", "个人信息", "合规"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-044",
+      "query": "5G技术在工业互联网中的应用进展如何？",
+      "language": "zh",
+      "expected_keywords": ["5G", "工业互联网", "物联网", "边缘计算", "低延迟"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-045",
+      "query": "开源软件的商业模式和社区治理有哪些变化？",
+      "language": "zh",
+      "expected_keywords": ["开源", "商业模式", "社区", "许可证", "维护"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-046",
+      "query": "量子计算在中国的发展情况如何？",
+      "language": "zh",
+      "expected_keywords": ["量子计算", "量子比特", "九章", "本源量子", "超导"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-047",
+      "query": "新能源汽车的电池技术有哪些突破？",
+      "language": "zh",
+      "expected_keywords": ["电池", "固态电池", "续航", "充电", "锂离子"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-048",
+      "query": "What are the environmental impacts of training large AI models?",
+      "language": "en",
+      "expected_keywords": ["carbon", "energy", "emissions", "training", "sustainability"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "tech-049",
+      "query": "How is retrieval-augmented generation improving AI accuracy?",
+      "language": "en",
+      "expected_keywords": ["RAG", "retrieval", "hallucination", "grounding", "knowledge"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "tech-050",
+      "query": "What are the latest developments in AI regulation worldwide?",
+      "language": "en",
+      "expected_keywords": ["regulation", "AI safety", "policy", "governance", "executive order"],
+      "difficulty": "medium"
+    }
+  ]
+}

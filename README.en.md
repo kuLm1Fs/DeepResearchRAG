@@ -1,13 +1,13 @@
-# RAG News Intelligence
+# RAG Finance Intelligence
 
 English | [简体中文](README.md)
 
-A bilingual news RAG system for Chinese and English. Supports multi-source collection, vectorization, hybrid retrieval, LangGraph Agent Q&A, and source citations. Designed to handle 100K–1M articles on a 4-core / 15.6GB server.
+A bilingual finance-focused RAG system for Chinese and English. Supports multi-source financial data collection, vectorization, hybrid retrieval, LangGraph Agent Q&A, and source citations. Designed to handle 100K–1M financial documents on a 4-core / 15.6GB server.
 
 ## Features
 
 ### Data Collection & Processing
-- Multi-source ingestion: RSS, HN API, Reddit API, HuggingFace datasets, custom crawlers
+- Multi-source ingestion: financial RSS, SEC filings, financial news APIs, HuggingFace finance datasets
 - Bilingual processing: Chinese/English cleaning, chunking (RecursiveCharacterTextSplitter, chunk_size=500), retrieval, and Q&A
 - Cloud embedding: Volcengine API, 1024 dimensions, batch size 50, auto-retry
 - Incremental dedup: SHA256 content_hash-based Milvus upserts

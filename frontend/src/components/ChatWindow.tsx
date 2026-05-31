@@ -1,24 +1,82 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { getAccessToken } from '../api/client'
+import { getAccessToken, submitFeedback } from '../api/client'
 import ErrorBoundary from './ErrorBoundary'
 import type { Message, Source } from '../types'
 
 const AVATAR_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23171312'/%3E%3Ctext x='50' y='68' font-size='50' font-weight='bold' text-anchor='middle' fill='white'%3ER%3C/text%3E%3C/svg%3E"
 
+const NEGATIVE_REASONS = ['irrelevant', 'outdated', 'wrong', 'incomplete'] as const
+
 interface MessageBubbleProps {
   message: Message
+  onFeedback?: (rating: 'positive' | 'negative', reason?: string) => void
 }
 
-const MessageBubble = memo(function MessageBubble({ message }: MessageBubbleProps) {
+const MessageBubble = memo(function MessageBubble({ message, onFeedback }: MessageBubbleProps) {
+  const [showReasons, setShowReasons] = useState(false)
+
+  const handleFeedback = (rating: 'positive' | 'negative') => {
+    if (message.feedback) return // already submitted
+    if (rating === 'negative') {
+      setShowReasons(true)
+      return
+    }
+    onFeedback?.('positive')
+  }
+
+  const handleReason = (reason: string) => {
+    setShowReasons(false)
+    onFeedback?.('negative', reason)
+  }
+
   return (
     <article className={`message ${message.role}`}>
       {message.role === 'assistant' && (
         <img className="avatar" src={AVATAR_SVG} alt="" aria-hidden="true" />
       )}
-      <div className="bubble">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+      <div className="message-body">
+        <div className="bubble">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+        </div>
+        {message.role === 'assistant' && !message.isError && message.content && (
+          <div className="feedback-bar">
+            {message.feedback ? (
+              <span className="feedback-thanks">
+                {message.feedback === 'positive' ? '👍 Thanks for the feedback' : '👎 Feedback recorded'}
+              </span>
+            ) : showReasons ? (
+              <div className="feedback-reasons">
+                {NEGATIVE_REASONS.map(r => (
+                  <button key={r} className="feedback-reason-btn" onClick={() => handleReason(r)}>
+                    {r}
+                  </button>
+                ))}
+                <button className="feedback-reason-btn cancel" onClick={() => setShowReasons(false)}>cancel</button>
+              </div>
+            ) : (
+              <div className="feedback-buttons">
+                <button
+                  className="feedback-btn"
+                  aria-label="Good answer"
+                  onClick={() => handleFeedback('positive')}
+                  title="Good answer"
+                >
+                  👍
+                </button>
+                <button
+                  className="feedback-btn"
+                  aria-label="Bad answer"
+                  onClick={() => handleFeedback('negative')}
+                  title="Bad answer"
+                >
+                  👎
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </article>
   )
@@ -71,17 +129,17 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
     setMessages(prev => [...prev, { role: 'assistant', content, isError }])
   }
 
-  const updateLastAssistantMessage = (content: string, isError = false) => {
+  const updateLastAssistantMessage = (content: string, isError = false, traceId?: string) => {
     setMessages(prev => {
       const newMessages = [...prev]
       const lastIndex = newMessages.length - 1
 
       if (lastIndex >= 0 && newMessages[lastIndex].role === 'assistant') {
-        newMessages[lastIndex] = { role: 'assistant', content, isError }
+        newMessages[lastIndex] = { ...newMessages[lastIndex], content, isError, traceId: traceId || newMessages[lastIndex].traceId }
         return newMessages
       }
 
-      return [...prev, { role: 'assistant', content, isError }]
+      return [...prev, { role: 'assistant', content, isError, traceId }]
     })
   }
 
@@ -176,9 +234,11 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
                 } else if (event.type === 'token') {
                   assistantMessage += event.data
                   updateLastAssistantMessage(assistantMessage)
-                } else if (event.type === 'done' && !assistantMessage) {
-                  assistantMessage = event.data?.answer || ''
-                  updateLastAssistantMessage(assistantMessage)
+                } else if (event.type === 'done') {
+                  if (!assistantMessage) {
+                    assistantMessage = event.data?.answer || ''
+                  }
+                  updateLastAssistantMessage(assistantMessage, false, event.data?.trace_id)
                 } else if (event.type === 'error') {
                   throw new Error(event.data || 'Streaming error')
                 }
@@ -229,7 +289,27 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
         )}
 
         {messages.map((msg, idx) => (
-          <MessageBubble key={idx} message={msg} />
+          <MessageBubble
+            key={idx}
+            message={msg}
+            onFeedback={msg.role === 'assistant' ? async (rating, reason) => {
+              setMessages(prev => {
+                const copy = [...prev]
+                copy[idx] = { ...copy[idx], feedback: rating }
+                return copy
+              })
+              try {
+                await submitFeedback({
+                  query_id: msg.traceId,
+                  query_text: messages[idx - 1]?.role === 'user' ? messages[idx - 1].content : undefined,
+                  rating,
+                  reason,
+                })
+              } catch (err) {
+                console.warn('[DEBUG] Feedback submission failed:', err)
+              }
+            } : undefined}
+          />
         ))}
 
         {loading && (

@@ -170,3 +170,24 @@ class IngestTask(Base):
     error: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+class Feedback(Base):
+    """用户反馈表 - 记录对查询回答的评价"""
+    __tablename__ = "feedbacks"
+    __table_args__ = (
+        CheckConstraint("rating IN ('positive', 'negative')"),
+        Index("idx_feedback_user", "user_id"),
+        Index("idx_feedback_company", "company_id"),
+        Index("idx_feedback_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    query_id: Mapped[Optional[str]] = mapped_column(String(64))
+    query_text: Mapped[Optional[str]] = mapped_column(String(2048))
+    rating: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(String(64))
+    comment: Mapped[Optional[str]] = mapped_column(String(1024))
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    company_id: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

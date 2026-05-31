@@ -17,6 +17,7 @@ function AppContent() {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
   const [externalQuery, setExternalQuery] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [mode, setMode] = useState<'research' | 'chat'>('research')
 
   // Close sidebar on escape key
   useEffect(() => {
@@ -45,13 +46,21 @@ function AppContent() {
       </button>
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} aria-label="侧边栏">
-        <div className="brand">
-          <div className="brand-mark" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: 800, color: 'var(--accent)' }}>
-            R
+        <div className="sidebar-header">
+          <div className="brand">
+            <div className="brand-mark" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: 800, color: 'var(--accent)' }}>
+              R
+            </div>
+            <div>
+              <strong>RAG News</strong>
+              <span>AI intelligence</span>
+            </div>
           </div>
-          <div>
-            <strong>RAG News</strong>
-            <span>AI intelligence</span>
+          <div className="sidebar-user">
+            <span className="sidebar-user-email" title={user?.email}>{user?.email}</span>
+            <button onClick={logout} className="ghost-button sidebar-logout" aria-label="退出登录">
+              退出
+            </button>
           </div>
         </div>
 
@@ -83,33 +92,32 @@ function AppContent() {
           <IngestPanel compact />
         </section>
 
-        <div style={{ marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid var(--sidebar-line)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px' }}>
-            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{user?.email}</span>
-            <button onClick={logout} className="ghost-button" style={{ height: '28px', padding: '0 12px', fontSize: '12px' }}>
-              退出
-            </button>
-          </div>
-        </div>
       </aside>
 
       <main className="chat-panel">
         <header className="chat-header">
           <div>
-            <p className="eyebrow">RAG-powered news Q&amp;A</p>
+            <p className="eyebrow">RAG-powered news intelligence</p>
             <h1>RAG News</h1>
-            <div className="context-strip" aria-label="当前状态">
-              <span>Multi-source retrieval</span>
-            </div>
-            <p className="header-copy">Ask questions about news articles. I&apos;ll search through sources and provide answers with citations.</p>
+            <p className="header-copy">Deep research or quick Q&amp;A — your call.</p>
           </div>
           <div className="header-actions">
             <HealthBadge />
           </div>
         </header>
 
-        <ChatWindow onSourcesUpdate={handleSourcesUpdate} externalQuery={externalQuery} onExternalQueryConsumed={() => setExternalQuery('')} />
-        <ResearchPanel />
+        <div className="mode-tabs">
+          <button className={`mode-tab ${mode === 'research' ? 'active' : ''}`} onClick={() => setMode('research')}>深度研究</button>
+          <button className={`mode-tab ${mode === 'chat' ? 'active' : ''}`} onClick={() => setMode('chat')}>对话问答</button>
+        </div>
+
+        {mode === 'research' ? (
+          <ResearchPanel />
+        ) : (
+          <div className="chat-content">
+            <ChatWindow onSourcesUpdate={handleSourcesUpdate} externalQuery={externalQuery} onExternalQueryConsumed={() => setExternalQuery('')} />
+          </div>
+        )}
       </main>
     </div>
     </ErrorBoundary>

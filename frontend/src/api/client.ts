@@ -1,4 +1,4 @@
-import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, IngestTaskResponse, QueryRequest, QueryResponse, Source, LoginRequest, RegisterRequest, AuthResponse, UserInfo, ResearchTaskResponse } from '../types'
+import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, IngestTaskResponse, QueryRequest, QueryResponse, Source, LoginRequest, RegisterRequest, AuthResponse, UserInfo, ResearchTaskResponse, FeedbackRequest, FeedbackStatsResponse } from '../types'
 
 const API_BASE = '/api'
 
@@ -238,4 +238,16 @@ export async function cancelResearchTask(taskId: string): Promise<void> {
   await fetchWithErrorHandling<void>(`${API_BASE}/research/${taskId}/cancel`, {
     method: 'POST',
   })
+}
+
+export async function submitFeedback(req: FeedbackRequest): Promise<{ id: number }> {
+  return fetchWithErrorHandling<{ id: number }>(`${API_BASE}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+}
+
+export async function getFeedbackStats(): Promise<FeedbackStatsResponse> {
+  return fetchWithErrorHandling<FeedbackStatsResponse>(`${API_BASE}/feedback/stats`)
 }

@@ -56,8 +56,11 @@
   padding: 0;
 }
 
+html, body, #root {
+  height: 100%;
+}
+
 body {
-  min-height: 100vh;
   overflow: hidden;
   background:
     radial-gradient(circle at 62% 8%, var(--glow-a), transparent 28rem),
@@ -116,7 +119,7 @@ a {
   display: grid;
   grid-template-columns: 292px minmax(0, 1fr);
   gap: 0;
-  min-height: 100vh;
+  height: 100%;
   padding: 0;
 }
 
@@ -125,7 +128,8 @@ a {
   display: grid;
   grid-template-rows: auto minmax(220px, 1fr) minmax(150px, 0.7fr);
   gap: 20px;
-  min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
   border-right: 1px solid var(--sidebar-line);
   border-radius: 0;
   background: var(--sidebar-bg);
@@ -163,6 +167,38 @@ a {
   margin-top: 2px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.sidebar-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--sidebar-line);
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.sidebar-user-email {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.sidebar-logout {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
 .sidebar-section {
@@ -226,9 +262,9 @@ a {
 /* Chat panel */
 .chat-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
-  min-height: 100vh;
+  height: 100vh;
   overflow: hidden;
   border-radius: 0;
   background: rgba(255, 255, 255, 0.32);
@@ -243,6 +279,43 @@ a {
   justify-content: space-between;
   gap: 20px;
   padding: 30px min(6vw, 72px) 16px;
+}
+
+/* Mode tabs */
+.mode-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--sidebar-line);
+  padding: 0 min(6vw, 72px);
+}
+
+.mode-tab {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.mode-tab:hover {
+  color: var(--text);
+}
+
+.mode-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* Chat content wrapper — holds messages + composer in one grid cell */
+.chat-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .eyebrow {
@@ -409,15 +482,16 @@ a {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 0 min(6vw, 72px) 30px;
+  padding: 0 min(4vw, 40px) 30px;
 }
 
 .composer-box {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto auto 40px;
-  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 8px;
-  width: min(760px, 100%);
+  width: 100%;
+  max-width: 900px;
   border: 1px solid var(--command-line);
   border-radius: 22px;
   background: var(--command-bg);
@@ -429,11 +503,17 @@ a {
     transform 160ms ease;
 }
 
+.composer-box textarea {
+  flex: 1;
+  min-width: 0;
+}
+
 .date-filter {
   display: flex;
   align-items: center;
   gap: 12px;
-  width: min(760px, 100%);
+  width: 100%;
+  max-width: 900px;
   padding: 8px 16px;
   margin-bottom: 6px;
   background: var(--command-bg);
@@ -1043,18 +1123,17 @@ textarea::placeholder {
 }
 
 .research-panel {
-  margin: 0 0 24px;
-  padding: 16px;
-  border: 1px solid var(--command-line);
-  border-radius: 8px;
-  background: var(--surface-strong);
-  overflow-wrap: break-word;
+  overflow-y: auto;
+  padding: 16px min(6vw, 72px) 24px;
 }
 
 .research-composer {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .research-composer textarea {
@@ -1096,8 +1175,6 @@ textarea::placeholder {
   display: grid;
   gap: 12px;
   margin-top: 14px;
-  max-height: 400px;
-  overflow-y: auto;
 }
 
 /* Step Stepper */
@@ -1358,6 +1435,80 @@ textarea::placeholder {
   font-size: 13px;
 }
 
+/* Feedback bar */
+.message-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.feedback-bar {
+  margin-top: 4px;
+  padding-left: 2px;
+}
+
+.feedback-buttons {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.message:hover .feedback-buttons,
+.feedback-buttons:focus-within {
+  opacity: 1;
+}
+
+.feedback-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+  border: none;
+  padding: 0;
+}
+
+.feedback-btn:hover {
+  background: var(--surface-strong);
+  transform: translateY(-1px);
+}
+
+.feedback-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.feedback-reason-btn {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--command-line);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 620;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.feedback-reason-btn:hover {
+  background: var(--surface-strong);
+  color: var(--text);
+}
+
+.feedback-reason-btn.cancel {
+  color: var(--faint);
+}
+
+.feedback-thanks {
+  font-size: 11px;
+  color: var(--faint);
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
@@ -1459,7 +1610,7 @@ textarea::placeholder {
   }
 
   .composer-box {
-    grid-template-columns: 36px minmax(0, 1fr) 40px;
+    /* flex layout, no grid override needed */
   }
 
   .model-select {
