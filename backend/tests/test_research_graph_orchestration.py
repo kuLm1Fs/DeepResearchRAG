@@ -52,7 +52,7 @@ class ResearchGraphOrchestrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_retriever_uses_checker_gaps_for_supplemental_search_and_merges_evidence(self):
         seen_queries = []
 
-        async def fake_retriever(sub_questions, user_id=None):
+        async def fake_retriever(sub_questions, user_id=None, company_id=None):
             seen_queries.extend(sub_questions)
             return {
                 "data": {

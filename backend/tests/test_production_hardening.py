@@ -116,9 +116,15 @@ class RetrieverFilterPushdownTests(unittest.IsolatedAsyncioTestCase):
                 self.search_expr = expr
                 return []
 
+            async def search_async(self, **kwargs):
+                return self.search(**kwargs)
+
             def query(self, expr, output_fields=None, limit=100):
                 self.query_exprs.append(expr)
                 return []
+
+            async def query_async(self, **kwargs):
+                return self.query(**kwargs)
 
         fake_store = FakeStore()
         retriever = MultiPathRetriever(fake_store, rerank_enabled=False)
@@ -250,6 +256,9 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
             def list_collectors(self):
                 return ["rss"]
 
+            def shutdown(self):
+                pass
+
         class FakeStore:
             def __init__(self):
                 self.exprs = []
@@ -297,6 +306,9 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
             def list_collectors(self):
                 return ["rss"]
 
+            def shutdown(self):
+                pass
+
             def collect_one(self, *args, **kwargs):
                 self.collected_inline = True
                 raise AssertionError("collect_one should run in background")
@@ -311,9 +323,21 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
         from starlette.requests import Request as StarletteRequest
         mock_request = StarletteRequest(scope={"type": "http", "method": "POST", "path": "/api/ingest/trigger", "headers": []})
 
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def fake_db_session():
+            class FakeDB:
+                def add(self, obj):
+                    pass
+                async def commit(self):
+                    pass
+            yield FakeDB()
+
         with (
             patch("ingestion.Pipeline", return_value=FakePipeline()),
             patch.object(api_routes, "reserve_company_quota", return_value=(True, None)),
+            patch.object(api_routes, "get_db_session", fake_db_session),
         ):
             response = await api_routes.ingest_trigger(
                 body=api_routes.IngestTriggerRequest(source="rss", limit=10),
@@ -346,6 +370,9 @@ class TenantIsolationTests(unittest.IsolatedAsyncioTestCase):
 
             def list_collectors(self):
                 return ["rss"]
+
+            def shutdown(self):
+                pass
 
         background_tasks = FakeBackgroundTasks()
 
