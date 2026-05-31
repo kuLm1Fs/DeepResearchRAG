@@ -60,6 +60,15 @@ class Pipeline:
         self.register(HNCollector())
         self.register(DatasetCollector())
 
+        # Feishu — 仅在配置了凭据时注册
+        try:
+            from core.config import settings as _s
+            if _s.feishu_app_id and _s.feishu_app_secret:
+                from .feishu_collector import FeishuCollector
+                self.register(FeishuCollector())
+        except Exception:
+            pass
+
     def unregister(self, name: str) -> bool:
         """
         注销采集器
@@ -208,8 +217,14 @@ class Pipeline:
 
     def shutdown(self) -> None:
         """
-        关闭调度器，释放线程池资源
+        关闭调度器，释放线程池资源和采集器持有的连接
         """
+        for name, collector in self.collectors.items():
+            if hasattr(collector, "close"):
+                try:
+                    collector.close()
+                except Exception as e:
+                    logger.warning("[Pipeline] 采集器关闭失败", collector=name, error=str(e))
         logger.info("[Pipeline] 关闭调度器", name=self.name)
         self._executor.shutdown(wait=True)
 

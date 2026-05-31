@@ -147,3 +147,26 @@ class AuditLog(Base):
     user_agent: Mapped[Optional[str]] = mapped_column(Text)
     details: Mapped[Optional[dict]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class IngestTask(Base):
+    """数据采集任务表 - 存储采集任务状态（替代内存 dict）"""
+    __tablename__ = "ingest_tasks"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'running', 'completed', 'failed')"),
+        Index("idx_ingest_user", "user_id"),
+        Index("idx_ingest_company", "company_id"),
+        Index("idx_ingest_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    source: Mapped[Optional[str]] = mapped_column(String(64))
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    company_id: Mapped[Optional[str]] = mapped_column(String(64))
+    articles_collected: Mapped[int] = mapped_column(Integer, default=0)
+    chunks_indexed: Mapped[int] = mapped_column(Integer, default=0)
+    records_inserted: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)

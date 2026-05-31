@@ -1,4 +1,5 @@
 from typing import Any
+import asyncio
 import hashlib
 
 from pymilvus import (
@@ -11,11 +12,11 @@ from pymilvus import (
 )
 
 from core import get_logger, settings, VectorStoreError
+from ._common import DIM, get_milvus_connection
 
 logger = get_logger(__name__)
 
 COLLECTION_NAME = "news_articles"
-DIM = 1024
 
 
 def compute_content_hash(record: dict[str, Any]) -> str:
@@ -39,20 +40,6 @@ def filter_new_records_by_hash(
         seen.add(content_hash)
         filtered.append(record)
     return filtered
-
-
-def get_milvus_connection():
-    """Get or create Milvus connection."""
-    alias = "default"
-    if not connections.has_connection(alias):
-        connections.connect(
-            alias=alias,
-            host=settings.milvus_host,
-            port=settings.milvus_port,
-            user=settings.milvus_user or None,
-            password=settings.milvus_password or None,
-        )
-    return alias
 
 
 def create_schema() -> CollectionSchema:
@@ -289,3 +276,17 @@ class MilvusStore:
             utility.drop_collection(self.collection_name)
             self._collection = None
             logger.info("collection_dropped", name=self.collection_name)
+
+    # --- Async wrappers (avoid blocking the event loop) ---
+
+    async def search_async(self, **kwargs) -> list[dict[str, Any]]:
+        """Async wrapper for search()."""
+        return await asyncio.to_thread(self.search, **kwargs)
+
+    async def query_async(self, **kwargs) -> list[dict[str, Any]]:
+        """Async wrapper for query()."""
+        return await asyncio.to_thread(self.query, **kwargs)
+
+    async def insert_async(self, records: list[dict[str, Any]]) -> list[int]:
+        """Async wrapper for insert()."""
+        return await asyncio.to_thread(self.insert, records)

@@ -5,7 +5,6 @@ from .jwt_handler import (
     create_refresh_token,
     decode_access_token,
     verify_token,
-    decode_token,
 )
 from .password import hash_password, verify_password
 
@@ -16,5 +15,4 @@ __all__ = [
     "create_refresh_token",
     "decode_access_token",
     "verify_token",
-    "decode_token",
 ]

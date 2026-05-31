@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Dynamically resolve paths relative to this config file
@@ -77,6 +78,12 @@ class Settings(BaseSettings):
     postgres_user: str = "rag_user"
     postgres_password: str = ""
 
+    # Feishu (飞书)
+    feishu_app_id: str = ""
+    feishu_app_secret: str = ""
+    feishu_wiki_space_ids: str = ""  # comma-separated; empty = all accessible
+    feishu_api_base: str = "https://open.feishu.cn/open-apis"
+
     # Prompt versioning
     prompt_version: str = "v1"
 
@@ -132,6 +139,20 @@ class Settings(BaseSettings):
         if self.is_prod:
             return [origin for origin in origins if origin != "*"]
         return origins or ["http://localhost:5173", "http://localhost:3000"]
+
+    @property
+    def feishu_space_id_list(self) -> list[str]:
+        return [s.strip() for s in self.feishu_wiki_space_ids.split(",") if s.strip()]
+
+    @model_validator(mode="after")
+    def _validate_secrets(self) -> "Settings":
+        if self.is_prod:
+            if not self.jwt_secret or len(self.jwt_secret) < 32:
+                raise ValueError(
+                    "JWT_SECRET must be at least 32 characters in production. "
+                    "Generate with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
+        return self
 
 
 settings = Settings()

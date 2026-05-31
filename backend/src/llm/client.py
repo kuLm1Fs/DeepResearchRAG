@@ -1,9 +1,43 @@
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator, Protocol
 
+import tenacity
+
 from core import get_logger
 
 logger = get_logger(__name__)
+
+# Retryable status codes from LLM APIs
+_RETRYABLE_STATUSES = {429, 500, 502, 503}
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """Check if an exception is retryable (rate limit or server error)."""
+    from openai import APIStatusError, APITimeoutError, APIConnectionError
+
+    if isinstance(exc, APITimeoutError | APIConnectionError):
+        return True
+    if isinstance(exc, APIStatusError) and exc.status_code in _RETRYABLE_STATUSES:
+        return True
+    return False
+
+
+def _make_retry():
+    """Create a tenacity retry decorator for LLM calls."""
+    return tenacity.retry(
+        stop=tenacity.stop_after_attempt(3),
+        wait=tenacity.wait_exponential(multiplier=1, min=1, max=10),
+        retry=tenacity.retry_if_exception(_is_retryable),
+        before_sleep=lambda retry_state: logger.warning(
+            "llm_retry",
+            attempt=retry_state.attempt_number,
+            error=str(retry_state.outcome.exception()) if retry_state.outcome else "",
+        ),
+        reraise=True,
+    )
+
+
+_retry = _make_retry()
 
 
 class Message(Protocol):
@@ -44,21 +78,47 @@ class BaseLLM(ABC):
                 })
         return formatted
 
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
 
-class DeepSeekLLM(BaseLLM):
-    def __init__(self, api_key: str, model: str = "deepseek-chat", **kwargs):
+
+# Provider-specific base URLs
+_PROVIDER_BASE_URLS: dict[str, str] = {
+    "deepseek": "https://api.deepseek.com",
+    "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    # "openai" uses the SDK default (https://api.openai.com/v1)
+}
+
+_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
+    "deepseek": "deepseek-chat",
+    "openai": "gpt-4o-mini",
+    "qwen": "qwen-max",
+}
+
+
+class OpenAICompatibleLLM(BaseLLM):
+    """Single LLM class for all OpenAI-API-compatible providers (DeepSeek, OpenAI, Qwen, etc.)."""
+
+    def __init__(self, api_key: str, model: str, base_url: str | None = None, **kwargs):
         super().__init__(api_key, model, **kwargs)
-        self._base_url = "https://api.deepseek.com"
+        self._base_url = base_url
 
     def _get_client(self):
         if self._client is None:
             from openai import AsyncOpenAI
-            self._client = AsyncOpenAI(
-                api_key=self.api_key,
-                base_url=self._base_url,
-            )
+            kwargs: dict[str, Any] = {
+                "api_key": self.api_key,
+                "timeout": 60.0,
+            }
+            if self._base_url:
+                kwargs["base_url"] = self._base_url
+            self._client = AsyncOpenAI(**kwargs)
         return self._client
 
+    @_retry
     async def chat(self, messages: list[Message], **kwargs) -> str:
         client = self._get_client()
         response = await client.chat.completions.create(
@@ -76,86 +136,26 @@ class DeepSeekLLM(BaseLLM):
             stream=True,
             **kwargs
         )
-        async for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+        try:
+            async for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        finally:
+            await stream.close()
 
 
-class OpenAILLM(BaseLLM):
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini", **kwargs):
-        super().__init__(api_key, model, **kwargs)
-
-    def _get_client(self):
-        if self._client is None:
-            from openai import AsyncOpenAI
-            self._client = AsyncOpenAI(api_key=self.api_key)
-        return self._client
-
-    async def chat(self, messages: list[Message], **kwargs) -> str:
-        client = self._get_client()
-        response = await client.chat.completions.create(
-            model=self.model,
-            messages=self._format_messages(messages),
-            **kwargs
-        )
-        return response.choices[0].message.content or ""
-
-    async def stream_chat(self, messages: list[Message], **kwargs) -> AsyncIterator[str]:
-        client = self._get_client()
-        stream = await client.chat.completions.create(
-            model=self.model,
-            messages=self._format_messages(messages),
-            stream=True,
-            **kwargs
-        )
-        async for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-
-
-class QwenLLM(BaseLLM):
-    def __init__(self, api_key: str, model: str = "qwen-max", **kwargs):
-        super().__init__(api_key, model, **kwargs)
-        self._base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-
-    def _get_client(self):
-        if self._client is None:
-            from openai import AsyncOpenAI
-            self._client = AsyncOpenAI(
-                api_key=self.api_key,
-                base_url=self._base_url,
-            )
-        return self._client
-
-    async def chat(self, messages: list[Message], **kwargs) -> str:
-        client = self._get_client()
-        response = await client.chat.completions.create(
-            model=self.model,
-            messages=self._format_messages(messages),
-            **kwargs
-        )
-        return response.choices[0].message.content or ""
-
-    async def stream_chat(self, messages: list[Message], **kwargs) -> AsyncIterator[str]:
-        client = self._get_client()
-        stream = await client.chat.completions.create(
-            model=self.model,
-            messages=self._format_messages(messages),
-            stream=True,
-            **kwargs
-        )
-        async for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+# Backward-compatible aliases
+DeepSeekLLM = OpenAICompatibleLLM
+OpenAILLM = OpenAICompatibleLLM
+QwenLLM = OpenAICompatibleLLM
 
 
 def create_llm(provider: str, api_key: str, model: str) -> BaseLLM:
     """Factory function to create LLM instance by provider name."""
-    providers = {
-        "deepseek": DeepSeekLLM,
-        "openai": OpenAILLM,
-        "qwen": QwenLLM,
-    }
-    if provider not in providers:
-        raise ValueError(f"Unknown LLM provider: {provider}. Available: {list(providers.keys())}")
-    return providers[provider](api_key=api_key, model=model)
+    if provider not in _PROVIDER_DEFAULT_MODELS:
+        raise ValueError(f"Unknown LLM provider: {provider}. Available: {list(_PROVIDER_DEFAULT_MODELS.keys())}")
+    return OpenAICompatibleLLM(
+        api_key=api_key,
+        model=model or _PROVIDER_DEFAULT_MODELS[provider],
+        base_url=_PROVIDER_BASE_URLS.get(provider),
+    )

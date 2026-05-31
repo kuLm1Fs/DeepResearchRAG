@@ -4,12 +4,13 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sse_starlette.sse import EventSourceResponse
 
 from core import get_logger, settings, write_audit_log, RAGError
 from core.metrics import metrics_registry
 from db import Company, check_connection, get_db_session
+from db.models import IngestTask
 from retrieval.retriever import build_filter_expr
 from vectorstore import MilvusStore
 
@@ -34,19 +35,6 @@ logger = get_logger(__name__)
 router = APIRouter()
 router.include_router(auth_router)
 router.include_router(research_router)
-ingest_tasks: dict[str, dict] = {}
-import time as _time
-
-def _cleanup_stale_tasks(ttl_seconds: int = 3600) -> None:
-    """Remove completed/failed tasks older than ttl_seconds."""
-    now = _time.time()
-    stale = [
-        tid for tid, t in ingest_tasks.items()
-        if t.get("status") in ("completed", "failed")
-        and now - t.get("finished_at", now) > ttl_seconds
-    ]
-    for tid in stale:
-        ingest_tasks.pop(tid, None)
 
 
 def build_query_filters(request: QueryRequest, current_user) -> dict[str, Any]:
@@ -104,27 +92,36 @@ async def run_ingest_task(
     company_id: str,
 ) -> None:
     from ingestion import Pipeline, index_articles
+    from sqlalchemy import update as sql_update
 
-    ingest_tasks[task_id]["status"] = "running"
+    async with get_db_session() as db:
+        await db.execute(
+            sql_update(IngestTask).where(IngestTask.id == task_id).values(status="running")
+        )
+        await db.commit()
+
     try:
         pipeline = Pipeline()
         pipeline.register_defaults()
 
-        if request.source:
-            articles = list(
-                pipeline.collect_one(
-                    request.source,
-                    limit=request.limit,
-                    fetch_full_text=request.fetch_full_text,
+        try:
+            if request.source:
+                articles = list(
+                    pipeline.collect_one(
+                        request.source,
+                        limit=request.limit,
+                        fetch_full_text=request.fetch_full_text,
+                    )
                 )
-            )
-        else:
-            articles = list(
-                pipeline.collect_all(
-                    limit=request.limit,
-                    fetch_full_text=request.fetch_full_text,
+            else:
+                articles = list(
+                    pipeline.collect_all(
+                        limit=request.limit,
+                        fetch_full_text=request.fetch_full_text,
+                    )
                 )
-            )
+        finally:
+            pipeline.shutdown()
 
         index_stats = {"chunks": 0, "inserted": 0}
         if request.index and articles:
@@ -134,16 +131,26 @@ async def run_ingest_task(
                 company_id=company_id,
             )
 
-        ingest_tasks[task_id].update({
-            "status": "completed",
-            "articles_collected": len(articles),
-            "chunks_indexed": index_stats.get("chunks", 0),
-            "records_inserted": index_stats.get("inserted", 0),
-            "finished_at": _time.time(),
-        })
+        async with get_db_session() as db:
+            await db.execute(
+                sql_update(IngestTask).where(IngestTask.id == task_id).values(
+                    status="completed",
+                    articles_collected=len(articles),
+                    chunks_indexed=index_stats.get("chunks", 0),
+                    records_inserted=index_stats.get("inserted", 0),
+                    finished_at=func.now(),
+                )
+            )
+            await db.commit()
         logger.info("ingestion_completed", task_id=task_id, source=request.source, articles=len(articles))
     except Exception as e:
-        ingest_tasks[task_id].update({"status": "failed", "error": str(e), "finished_at": _time.time()})
+        async with get_db_session() as db:
+            await db.execute(
+                sql_update(IngestTask).where(IngestTask.id == task_id).values(
+                    status="failed", error=str(e), finished_at=func.now()
+                )
+            )
+            await db.commit()
         metrics_registry.increment("rag_ingest_trigger_errors_total")
         logger.error("ingest_task_failed", task_id=task_id, source=request.source, error=str(e))
 
@@ -205,15 +212,27 @@ async def query(body: QueryRequest, request: Request, background_tasks: Backgrou
 
         return EventSourceResponse(stream_generator())
     else:
-        # 非流式路径：保持现有逻辑
+        # 非流式路径
         from agent import run_agent
 
-        result = await run_agent(
-            query=body.query,
-            trace_id=trace_id,
-            top_k=body.top_k,
-            filters=filters,
-        )
+        try:
+            result = await run_agent(
+                query=body.query,
+                trace_id=trace_id,
+                top_k=body.top_k,
+                filters=filters,
+            )
+        except Exception as e:
+            logger.error("non_stream_query_failed", trace_id=trace_id, error=str(e))
+            metrics_registry.increment("rag_query_errors_total")
+
+            async def error_generator():
+                yield {
+                    "event": "error",
+                    "data": json.dumps({"type": "error", "data": str(e)}, ensure_ascii=False),
+                }
+
+            return EventSourceResponse(error_generator())
 
         answer = result.get("answer", "")
         sources = result.get("sources", [])
@@ -248,9 +267,15 @@ async def get_stats(current_user=Depends(get_current_user)):
         store = MilvusStore()
 
         # Get tenant-scoped sample to build stats.
-        sample_results = store.query(expr=build_current_user_expr(current_user), limit=10000)
+        sample_results = store.query(
+            expr=build_current_user_expr(current_user),
+            limit=10000,
+            output_fields=["source", "category", "language", "parent_doc_id"],
+        )
         total = len(sample_results)
 
+        # Count unique articles by parent_doc_id
+        parent_ids: set[str] = set()
         sources: dict[str, int] = {}
         categories: dict[str, int] = {}
         languages: dict[str, int] = {}
@@ -259,13 +284,21 @@ async def get_stats(current_user=Depends(get_current_user)):
             source = r.get("source", "unknown")
             category = r.get("category", "unknown")
             language = r.get("language", "unknown")
+            parent_doc_id = r.get("parent_doc_id", "")
+
+            if parent_doc_id:
+                parent_ids.add(parent_doc_id)
 
             sources[source] = sources.get(source, 0) + 1
             categories[category] = categories.get(category, 0) + 1
             languages[language] = languages.get(language, 0) + 1
 
+        # If no parent_doc_id, each record is an article (pre-chunking data)
+        total_articles = len(parent_ids) if parent_ids else total
+
         return StatsResponse(
-            total_articles=total,
+            total_articles=total_articles,
+            total_chunks=total,
             sources=sources,
             categories=categories,
             languages=languages,
@@ -340,13 +373,16 @@ async def ingest_trigger(
 
         collector_name = body.source
 
-        if collector_name:
-            if collector_name not in pipeline.list_collectors():
-                return IngestTriggerResponse(
-                    status="error",
-                    source=collector_name,
-                    message=f"Collector '{collector_name}' not found",
-                )
+        try:
+            if collector_name:
+                if collector_name not in pipeline.list_collectors():
+                    return IngestTriggerResponse(
+                        status="error",
+                        source=collector_name,
+                        message=f"Collector '{collector_name}' not found",
+                    )
+        finally:
+            pipeline.shutdown()
 
         quota_ok, quota_error = await reserve_company_quota(current_user)
         if not quota_ok:
@@ -357,21 +393,25 @@ async def ingest_trigger(
             )
 
         task_id = f"ingest_{uuid.uuid4().hex[:12]}"
-        ingest_tasks[task_id] = {
-            "status": "pending",
-            "source": collector_name,
-            "user_id": getattr(current_user, "id", "") or "",
-            "company_id": getattr(current_user, "company_id", "") or "",
-            "articles_collected": 0,
-            "chunks_indexed": 0,
-            "records_inserted": 0,
-        }
+        user_id = getattr(current_user, "id", "") or ""
+        company_id = getattr(current_user, "company_id", "") or ""
+
+        async with get_db_session() as db:
+            db.add(IngestTask(
+                id=task_id,
+                status="pending",
+                source=collector_name,
+                user_id=user_id,
+                company_id=company_id,
+            ))
+            await db.commit()
+
         background_tasks.add_task(
             run_ingest_task,
             task_id,
             body,
-            ingest_tasks[task_id]["user_id"],
-            ingest_tasks[task_id]["company_id"],
+            user_id,
+            company_id,
         )
         logger.info("ingestion_task_enqueued", task_id=task_id, source=collector_name)
 
@@ -406,44 +446,57 @@ async def ingest_trigger(
 @router.get("/ingest/task/{task_id}", response_model=IngestTaskResponse)
 async def ingest_task_status(task_id: str, current_user=Depends(get_current_user)):
     """Get status of a specific ingestion task."""
-    task = ingest_tasks.get(task_id)
+    async with get_db_session() as db:
+        result = await db.execute(select(IngestTask).where(IngestTask.id == task_id))
+        task = result.scalar_one_or_none()
+
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     # Only allow the task owner (or same company) to view status
     user_id = getattr(current_user, "id", "")
     company_id = getattr(current_user, "company_id", "")
-    if task.get("user_id") != user_id and task.get("company_id") != company_id:
+    if task.user_id != user_id and task.company_id != company_id:
         raise HTTPException(status_code=403, detail="Access denied")
     return IngestTaskResponse(
         task_id=task_id,
-        status=task["status"],
-        source=task.get("source"),
-        articles_collected=task.get("articles_collected", 0),
-        chunks_indexed=task.get("chunks_indexed", 0),
-        records_inserted=task.get("records_inserted", 0),
-        error=task.get("error"),
+        status=task.status,
+        source=task.source,
+        articles_collected=task.articles_collected,
+        chunks_indexed=task.chunks_indexed,
+        records_inserted=task.records_inserted,
+        error=task.error,
     )
 
 
 @router.get("/ingest/tasks", response_model=list[IngestTaskResponse])
 async def ingest_task_list(current_user=Depends(get_current_user)):
-    """List active ingestion tasks for the current user/company."""
-    _cleanup_stale_tasks()
+    """List ingestion tasks for the current user/company (last 50)."""
     user_id = getattr(current_user, "id", "")
     company_id = getattr(current_user, "company_id", "")
-    results = []
-    for tid, task in ingest_tasks.items():
-        if task.get("user_id") == user_id or task.get("company_id") == company_id:
-            results.append(IngestTaskResponse(
-                task_id=tid,
-                status=task["status"],
-                source=task.get("source"),
-                articles_collected=task.get("articles_collected", 0),
-                chunks_indexed=task.get("chunks_indexed", 0),
-                records_inserted=task.get("records_inserted", 0),
-                error=task.get("error"),
-            ))
-    return results
+
+    async with get_db_session() as db:
+        result = await db.execute(
+            select(IngestTask)
+            .where(
+                (IngestTask.user_id == user_id) | (IngestTask.company_id == company_id)
+            )
+            .order_by(IngestTask.created_at.desc())
+            .limit(50)
+        )
+        tasks = result.scalars().all()
+
+    return [
+        IngestTaskResponse(
+            task_id=t.id,
+            status=t.status,
+            source=t.source,
+            articles_collected=t.articles_collected,
+            chunks_indexed=t.chunks_indexed,
+            records_inserted=t.records_inserted,
+            error=t.error,
+        )
+        for t in tasks
+    ]
 
 
 @router.get("/ingest/status", response_model=IngestStatusResponse)
@@ -458,21 +511,24 @@ async def ingest_status(current_user=Depends(get_current_user)):
         pipeline = Pipeline()
         pipeline.register_defaults()
 
-        store = MilvusStore()
+        try:
+            store = MilvusStore()
 
-        # Get tenant-scoped source breakdown from sample.
-        sample_results = store.query(expr=build_current_user_expr(current_user), limit=1000)
-        total = len(sample_results)
-        sources: dict[str, int] = {}
-        for r in sample_results:
-            source = r.get("source", "unknown")
-            sources[source] = sources.get(source, 0) + 1
+            # Get tenant-scoped source breakdown from sample.
+            sample_results = store.query(expr=build_current_user_expr(current_user), limit=1000)
+            total = len(sample_results)
+            sources: dict[str, int] = {}
+            for r in sample_results:
+                source = r.get("source", "unknown")
+                sources[source] = sources.get(source, 0) + 1
 
-        return IngestStatusResponse(
-            total_articles=total,
-            sources=sources,
-            collectors=pipeline.list_collectors(),
-        )
+            return IngestStatusResponse(
+                total_articles=total,
+                sources=sources,
+                collectors=pipeline.list_collectors(),
+            )
+        finally:
+            pipeline.shutdown()
     except RAGError as e:
         logger.error("ingest_status_failed", error=str(e))
         metrics_registry.increment("rag_ingest_status_errors_total")

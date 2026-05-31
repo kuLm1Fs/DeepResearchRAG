@@ -12,25 +12,16 @@ from pymilvus import (
 )
 
 from core import get_logger, settings, VectorStoreError
+from ._common import DIM, get_milvus_connection
 
 logger = get_logger(__name__)
 
+
+def _escape_milvus_str(value: Any) -> str:
+    """Escape string content for Milvus scalar equality filters."""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
 COLLECTION_NAME = "ai_industry_articles"
-DIM = 1024
-
-
-def get_milvus_connection():
-    """Get or create Milvus connection."""
-    alias = "default"
-    if not connections.has_connection(alias):
-        connections.connect(
-            alias=alias,
-            host=settings.milvus_host,
-            port=settings.milvus_port,
-            user=settings.milvus_user or None,
-            password=settings.milvus_password or None,
-        )
-    return alias
 
 
 def create_schema() -> CollectionSchema:
@@ -49,6 +40,7 @@ def create_schema() -> CollectionSchema:
         FieldSchema(name="language", dtype=DataType.VARCHAR, max_length=10),
         FieldSchema(name="published_at", dtype=DataType.INT64),
         FieldSchema(name="user_id", dtype=DataType.VARCHAR, max_length=64),
+        FieldSchema(name="company_id", dtype=DataType.VARCHAR, max_length=64),
         FieldSchema(name="domain", dtype=DataType.VARCHAR, max_length=32),
         FieldSchema(name="content_hash", dtype=DataType.VARCHAR, max_length=64),
     ]
@@ -126,23 +118,26 @@ class IndustryCollection:
         query_embedding: list[float],
         top_k: int = 10,
         user_id: str | None = None,
+        company_id: str | None = None,
         filters: dict[str, Any] | None = None,
         output_fields: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Search similar articles, optionally filtered by user_id."""
+        """Search similar articles, filtered by user_id and/or company_id."""
         if output_fields is None:
             output_fields = [
                 "id", "title", "content", "summary", "source",
-                "category", "language", "published_at", "user_id"
+                "category", "language", "published_at", "user_id", "company_id",
             ]
 
         expr_parts = []
         if user_id:
-            expr_parts.append(f'user_id == "{user_id}"')
+            expr_parts.append(f'user_id == "{_escape_milvus_str(user_id)}"')
+        if company_id:
+            expr_parts.append(f'company_id == "{_escape_milvus_str(company_id)}"')
         if filters:
             for key, val in filters.items():
                 if isinstance(val, str):
-                    expr_parts.append(f'{key} == "{val}"')
+                    expr_parts.append(f'{key} == "{_escape_milvus_str(val)}"')
                 else:
                     expr_parts.append(f"{key} == {val}")
 
@@ -168,14 +163,19 @@ class IndustryCollection:
 
     def delete_by_user_id(self, user_id: str) -> int:
         """Delete all articles for a user."""
-        expr = f'user_id == "{user_id}"'
+        expr = f'user_id == "{_escape_milvus_str(user_id)}"'
         result = self.collection.delete(expr)
         self.collection.flush()
         return result
 
-    def count(self, user_id: str | None = None) -> int:
-        """Count articles, optionally filtered by user_id."""
+    def count(self, user_id: str | None = None, company_id: str | None = None) -> int:
+        """Count articles, optionally filtered by user_id and/or company_id."""
+        expr_parts = []
         if user_id:
-            expr = f'user_id == "{user_id}"'
+            expr_parts.append(f'user_id == "{_escape_milvus_str(user_id)}"')
+        if company_id:
+            expr_parts.append(f'company_id == "{_escape_milvus_str(company_id)}"')
+        if expr_parts:
+            expr = " && ".join(expr_parts)
             return self.collection.query(expr, output_fields=["count(*)"])[0]["count(*)"]
         return self.collection.num_entities

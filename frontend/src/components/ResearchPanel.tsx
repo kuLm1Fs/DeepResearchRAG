@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { createResearchTask, researchEventsUrl, cancelResearchTask } from '../api/client'
+import { createResearchTask, fetchResearchEvents, cancelResearchTask } from '../api/client'
 import type { ResearchTaskResponse } from '../types'
 
 const PIPELINE_STEPS = ['planner', 'retriever', 'analyst', 'checker', 'writer'] as const
@@ -126,9 +126,9 @@ export default function ResearchPanel() {
   const [task, setTask] = useState<ResearchTaskResponse | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const sourceRef = useRef<EventSource | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => () => sourceRef.current?.close(), [])
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const startResearch = async () => {
     if (!query.trim() || running) return
@@ -138,20 +138,23 @@ export default function ResearchPanel() {
     try {
       const created = await createResearchTask(query.trim())
       setTask(created)
-      const events = new EventSource(researchEventsUrl(created.task_id))
-      sourceRef.current = events
-      events.addEventListener('progress', event => {
-        const payload = JSON.parse((event as MessageEvent).data) as ResearchTaskResponse
-        setTask(payload)
-        if (payload.status === 'completed' || payload.status === 'failed') {
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      fetchResearchEvents(
+        created.task_id,
+        (payload) => {
+          setTask(payload)
+          if (payload.status === 'completed' || payload.status === 'failed') {
+            setRunning(false)
+          }
+        },
+        (err) => {
+          setError(err.message)
           setRunning(false)
-          events.close()
-        }
-      })
-      events.onerror = () => {
-        setRunning(false)
-        events.close()
-      }
+        },
+        controller.signal,
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建研究任务失败')
       setRunning(false)
@@ -159,12 +162,14 @@ export default function ResearchPanel() {
   }
 
   const handleCancel = async () => {
+    abortRef.current?.abort()
     if (!task?.task_id) return
     try {
       await cancelResearchTask(task.task_id)
     } catch {
       // ignore
     }
+    setRunning(false)
   }
 
   const slides = task?.ppt_outline?.slides || []

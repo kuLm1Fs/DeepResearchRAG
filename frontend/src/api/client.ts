@@ -52,66 +52,17 @@ function clearAuthAndRedirect() {
 }
 
 /**
- * 通用错误处理 fetch 工具函数，支持 401 自动刷新 token
+ * Auth-aware fetch: injects Authorization header and handles 401 with token refresh.
+ * Returns the raw Response — caller decides how to parse it.
  */
-export async function fetchWithErrorHandling<T>(url: string, options?: RequestInit): Promise<T> {
-  const timeoutSignal = AbortSignal.timeout(30000)
-  const signal = options?.signal
-    ? AbortSignal.any([options.signal, timeoutSignal])
-    : timeoutSignal
-
-  const doFetch = async (): Promise<Response> =>
+async function fetchWithAuth(url: string, options?: RequestInit): Promise<Response> {
+  const doFetch = (): Promise<Response> =>
     fetch(url, {
       ...options,
       headers: {
         ...getAuthHeaders(),
         ...(options?.headers || {}),
       },
-      signal,
-    })
-
-  let response = await doFetch()
-
-  // Handle 401 with token refresh
-  if (response.status === 401) {
-    if (isRefreshing) {
-      // Wait for the in-progress refresh, then retry
-      await new Promise<void>(resolve => refreshQueue.push(resolve))
-      response = await doFetch()
-    } else {
-      isRefreshing = true
-      const ok = await refreshAccessToken()
-      isRefreshing = false
-      // Wake up queued requests
-      refreshQueue.forEach(resolve => resolve())
-      refreshQueue = []
-
-      if (ok) {
-        response = await doFetch()
-      } else {
-        clearAuthAndRedirect()
-        throw new Error('Session expired')
-      }
-    }
-  }
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status}: ${errorText || response.statusText || 'Unknown error'}`)
-  }
-
-  return response.json()
-}
-
-export async function query(request: QueryRequest): Promise<Response> {
-  const doFetch = () =>
-    fetch(`${API_BASE}/query`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders(),
-      },
-      body: JSON.stringify(request),
     })
 
   let response = await doFetch()
@@ -126,6 +77,7 @@ export async function query(request: QueryRequest): Promise<Response> {
       isRefreshing = false
       refreshQueue.forEach(resolve => resolve())
       refreshQueue = []
+
       if (ok) {
         response = await doFetch()
       } else {
@@ -136,6 +88,44 @@ export async function query(request: QueryRequest): Promise<Response> {
   }
 
   return response
+}
+
+/**
+ * JSON fetch with auth + error handling. Parses response as JSON.
+ */
+export async function fetchWithErrorHandling<T>(url: string, options?: RequestInit): Promise<T> {
+  const timeoutSignal = AbortSignal.timeout(30000)
+  const signal = options?.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal
+
+  const response = await fetchWithAuth(url, { ...options, signal })
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '')
+    throw new Error(`HTTP ${response.status}: ${errorText || response.statusText || 'Unknown error'}`)
+  }
+
+  return response.json()
+}
+
+/**
+ * Store auth tokens from login/register response.
+ */
+function storeAuthTokens(res: AuthResponse): void {
+  if (res.access_token) {
+    localStorage.setItem('access_token', res.access_token)
+    localStorage.setItem('refresh_token', res.refresh_token)
+    localStorage.setItem('user', JSON.stringify(res.user))
+  }
+}
+
+export async function query(request: QueryRequest): Promise<Response> {
+  return fetchWithAuth(`${API_BASE}/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
 }
 
 export async function getStats(): Promise<Stats> {
@@ -168,11 +158,7 @@ export async function login(req: LoginRequest): Promise<AuthResponse> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   })
-  if (res.access_token) {
-    localStorage.setItem('access_token', res.access_token)
-    localStorage.setItem('refresh_token', res.refresh_token)
-    localStorage.setItem('user', JSON.stringify(res.user))
-  }
+  storeAuthTokens(res)
   return res
 }
 
@@ -182,11 +168,7 @@ export async function register(req: RegisterRequest): Promise<AuthResponse> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   })
-  if (res.access_token) {
-    localStorage.setItem('access_token', res.access_token)
-    localStorage.setItem('refresh_token', res.refresh_token)
-    localStorage.setItem('user', JSON.stringify(res.user))
-  }
+  storeAuthTokens(res)
   return res
 }
 
@@ -217,9 +199,39 @@ export async function createResearchTask(query: string): Promise<ResearchTaskRes
   })
 }
 
-export function researchEventsUrl(taskId: string): string {
-  const token = getAccessToken()
-  return `${API_BASE}/research/${taskId}/events?token=${encodeURIComponent(token || '')}`
+export async function fetchResearchEvents(
+  taskId: string,
+  onEvent: (data: ResearchTaskResponse) => void,
+  onError: (err: Error) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  try {
+    const response = await fetchWithAuth(`${API_BASE}/research/${taskId}/events`, { signal })
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const frames = buffer.split('\n\n')
+      buffer = frames.pop()!
+      for (const frame of frames) {
+        const eventMatch = frame.match(/^event:\s*(.+)$/m)
+        const dataMatch = frame.match(/^data:\s*(.+)$/m)
+        if (eventMatch?.[1] === 'progress' && dataMatch?.[1]) {
+          onEvent(JSON.parse(dataMatch[1]))
+        }
+      }
+    }
+  } catch (err) {
+    if (signal?.aborted) return
+    onError(err instanceof Error ? err : new Error(String(err)))
+  }
 }
 
 export async function cancelResearchTask(taskId: string): Promise<void> {

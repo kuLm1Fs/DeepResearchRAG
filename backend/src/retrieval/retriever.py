@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 
 from core import RetrievalError, get_logger
@@ -121,14 +122,12 @@ class MultiPathRetriever:
         try:
             filter_expr = build_filter_expr(filters)
 
-            # Path 1: Semantic vector search
-            semantic_results = await self._semantic_search(query, filter_expr=filter_expr)
-
-            # Path 2: Keyword search
-            keyword_results = await self._keyword_search(query, filter_expr=filter_expr)
-
-            # Path 3: Title exact match
-            title_results = await self._title_match(query, filter_expr=filter_expr)
+            # Run all three paths in parallel
+            semantic_results, keyword_results, title_results = await asyncio.gather(
+                self._semantic_search(query, filter_expr=filter_expr),
+                self._keyword_search(query, filter_expr=filter_expr),
+                self._title_match(query, filter_expr=filter_expr),
+            )
 
             # Keep an in-process filter as a defensive check for test fakes or stores
             # that do not enforce scalar expressions.
@@ -185,7 +184,7 @@ class MultiPathRetriever:
         """Vector similarity search."""
         try:
             query_embedding = (await embed_texts_async([query]))[0]
-            return self.store.search(
+            return await self.store.search_async(
                 query_embedding=query_embedding,
                 top_k=self.semantic_limit,
                 expr=filter_expr,
@@ -201,8 +200,7 @@ class MultiPathRetriever:
     ) -> list[dict[str, Any]]:
         """Keyword/fulltext search on title and content."""
         try:
-            # 搜索 title 和 content 两个字段，使用 OR 条件
-            results = self.store.query(
+            results = await self.store.query_async(
                 expr=combine_expr(build_like_expr(["title", "content"], query), filter_expr),
                 output_fields=[
                     "title", "content", "source", "language", "category", "published_at",
@@ -210,7 +208,6 @@ class MultiPathRetriever:
                 ],
                 limit=self.keyword_limit,
             )
-            # 添加默认分数
             for r in results:
                 r["score"] = 0.5
             return results
@@ -225,7 +222,7 @@ class MultiPathRetriever:
     ) -> list[dict[str, Any]]:
         """Exact title matching."""
         try:
-            results = self.store.query(
+            results = await self.store.query_async(
                 expr=combine_expr(build_like_expr(["title"], query), filter_expr),
                 output_fields=[
                     "title", "content", "source", "language", "category", "published_at",

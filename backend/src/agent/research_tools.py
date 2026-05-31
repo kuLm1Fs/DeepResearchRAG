@@ -9,16 +9,33 @@ from .nodes import parse_json_object
 
 logger = get_logger(__name__)
 
+# Module-level singletons to avoid connection leaks and model reloads
+_cached_llm = None
+_cached_retriever = None
 
-def _create_research_llm():
-    """统一 LLM 实例化（供各 tool 的 _async_* 函数调用）"""
-    from llm import create_llm
 
-    return create_llm(
-        provider=settings.llm_provider,
-        api_key=getattr(settings, f"{settings.llm_provider}_api_key", ""),
-        model=settings.llm_model,
-    )
+def _get_research_llm():
+    """Get or create a cached LLM instance."""
+    global _cached_llm
+    if _cached_llm is None:
+        from llm import create_llm
+        _cached_llm = create_llm(
+            provider=settings.llm_provider,
+            api_key=getattr(settings, f"{settings.llm_provider}_api_key", ""),
+            model=settings.llm_model,
+        )
+    return _cached_llm
+
+
+def _get_research_retriever():
+    """Get or create a cached MultiPathRetriever."""
+    global _cached_retriever
+    if _cached_retriever is None:
+        from vectorstore.milvus_store import MilvusStore
+        from retrieval import MultiPathRetriever
+        store = MilvusStore()
+        _cached_retriever = MultiPathRetriever(store)
+    return _cached_retriever
 
 
 def _make_tool_result(
@@ -81,7 +98,7 @@ async def aplanner(query: str, user_id: str | None = None) -> dict[str, Any]:
 
 async def _async_llm_planner(query: str) -> dict[str, Any]:
     """调用 LLM 生成研究计划（async）"""
-    llm = _create_research_llm()
+    llm = _get_research_llm()
     messages = [
         {
             "role": "system",
@@ -141,7 +158,7 @@ def _error_result(error: str) -> dict[str, Any]:
     return _make_tool_result(str(uuid.uuid4())[:8], {}, status="error", errors=[error], gaps=["planner 调用失败"])
 
 
-def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = None) -> dict[str, Any]:
+def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = None, company_id: str | None = None) -> dict[str, Any]:
     """
     多路检索 + 结果合并去重。
 
@@ -149,6 +166,7 @@ def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = No
         sub_questions (list[str]): 子问题列表
         top_k (int): 每个子问题返回数量
         user_id (str, optional): 用户 ID（用于数据隔离）
+        company_id (str, optional): 公司 ID（用于租户隔离）
 
     Returns:
         dict: {
@@ -163,10 +181,15 @@ def retriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = No
             "gaps": list[str]
         }
     """
-    return asyncio.run(aretriever(sub_questions=sub_questions, top_k=top_k, user_id=user_id))
+    return asyncio.run(aretriever(sub_questions=sub_questions, top_k=top_k, user_id=user_id, company_id=company_id))
 
 
-async def aretriever(sub_questions: list[str], top_k: int = 5, user_id: str | None = None) -> dict[str, Any]:
+async def aretriever(
+    sub_questions: list[str],
+    top_k: int = 5,
+    user_id: str | None = None,
+    company_id: str | None = None,
+) -> dict[str, Any]:
     """Async multi-path retriever for LangGraph execution."""
     task_id = str(uuid.uuid4())[:8]
     all_evidence = []
@@ -182,19 +205,22 @@ async def aretriever(sub_questions: list[str], top_k: int = 5, user_id: str | No
             "gaps": ["请配置 VOLCENGINE_API_KEY 以启用检索功能"]
         }
 
-    try:
-        from vectorstore.milvus_store import MilvusStore
-        from retrieval import MultiPathRetriever
+    # Build tenant-scoped filters
+    tenant_filters: dict[str, str] = {}
+    if company_id:
+        tenant_filters["company_id"] = company_id
+    elif user_id:
+        tenant_filters["user_id"] = user_id
 
-        store = MilvusStore()
-        multi_retriever = MultiPathRetriever(store)
+    try:
+        multi_retriever = _get_research_retriever()
 
         for q in sub_questions:
             try:
                 results = await multi_retriever.retrieve(
                     query=q,
                     top_k=top_k,
-                    filters=None,
+                    filters=tenant_filters or None,
                 )
 
                 for r in results:
@@ -303,7 +329,7 @@ async def aanalyst(evidence: list[dict], focus: str = "all") -> dict[str, Any]:
 
 async def _async_analyst(evidence: list[dict], focus: str) -> dict[str, Any]:
     """调用 LLM 分析证据（async）"""
-    llm = _create_research_llm()
+    llm = _get_research_llm()
 
     evidence_snippets = []
     for i, e in enumerate(evidence[:10]):
@@ -424,7 +450,7 @@ async def achecker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
 
 async def _async_checker(claims: list[dict], evidence: list[dict]) -> dict[str, Any]:
     """调用 LLM 进行事实核查（async）"""
-    llm = _create_research_llm()
+    llm = _get_research_llm()
 
     # 构建 claims 文本（最多 10 条）
     claims_snippets = []
@@ -672,7 +698,7 @@ def _generate_fallback_ppt(audience: str) -> tuple[dict, list[dict]]:
 
 async def _async_writer(analysis: dict, check_result: dict | None, output_format: str) -> dict[str, Any]:
     """调用 LLM 生成 Markdown 报告（async）"""
-    llm = _create_research_llm()
+    llm = _get_research_llm()
 
     # 提取 analyst 数据（兼容 stub 输出）
     data = analysis.get("data", analysis) if isinstance(analysis, dict) else {}

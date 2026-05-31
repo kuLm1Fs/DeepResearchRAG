@@ -3,13 +3,12 @@ import asyncio
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 
 from .auth import get_current_user
-from ..auth import decode_access_token
 from ..core import get_logger, write_audit_log
 from ..db.database import get_db_session
 from ..db.models import User, ResearchTask
@@ -17,8 +16,8 @@ from ..db.models import User, ResearchTask
 logger = get_logger(__name__)
 router = APIRouter(prefix="/research", tags=["research"])
 
-# In-memory set of cancelled task IDs. Checked by research_graph nodes.
-_cancelled_tasks: set[str] = set()
+# Track in-flight research tasks to prevent GC before completion
+_active_tasks: set[asyncio.Task] = set()
 
 
 class ResearchRequest(BaseModel):
@@ -109,8 +108,6 @@ async def _run_research_task(task_id: str, query: str, user_id: str, company_id:
                 await db.commit()
         except Exception as update_err:
             logger.error("research_task_failure_status_update_failed", task_id=task_id, error=str(update_err))
-    finally:
-        _cancelled_tasks.discard(task_id)
 
 
 @router.post("", response_model=ResearchResponse)
@@ -135,6 +132,21 @@ async def create_research(
     logger.info("research_task_created", task_id=task_id, user_id=user.id, query=req.query)
 
     try:
+        # 并发限制：检查当前 running 任务数
+        MAX_CONCURRENT_RESEARCH = 3
+        async with get_db_session() as db:
+            result = await db.execute(
+                select(func.count()).where(ResearchTask.status == "running")
+            )
+            running_count = result.scalar() or 0
+
+        if running_count >= MAX_CONCURRENT_RESEARCH:
+            logger.warning("research_concurrency_limit", running=running_count)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many concurrent research tasks ({running_count}/{MAX_CONCURRENT_RESEARCH}). Please wait for existing tasks to complete.",
+            )
+
         # 写入 research_tasks 表（初始状态为 running）
         async with get_db_session() as db:
             task = ResearchTask(
@@ -150,9 +162,11 @@ async def create_research(
             await db.commit()
 
         # 启动后台任务执行完整研究流程
-        asyncio.create_task(
+        task_ref = asyncio.create_task(
             _run_research_task(task_id, req.query, user.id, user.company_id)
         )
+        _active_tasks.add(task_ref)
+        task_ref.add_done_callback(_active_tasks.discard)
 
         background_tasks.add_task(
             write_audit_log,
@@ -260,10 +274,7 @@ async def cancel_research(task_id: str, current_user: Annotated[User, Depends(ge
     if task.status not in ("running", "pending"):
         raise HTTPException(status_code=400, detail=f"任务已{task.status}，无法取消")
 
-    # Signal cancellation to the graph
-    _cancelled_tasks.add(task_id)
-
-    # Update DB status
+    # Update DB status — research_graph checks this to detect cancellation
     async with get_db_session() as db:
         await db.execute(
             update(ResearchTask)
@@ -276,28 +287,9 @@ async def cancel_research(task_id: str, current_user: Annotated[User, Depends(ge
     return {"task_id": task_id, "status": "failed", "message": "任务已取消"}
 
 
-async def _resolve_event_user(token: str | None) -> User:
-    if not token:
-        raise HTTPException(status_code=401, detail="缺少 token")
-    try:
-        payload = decode_access_token(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="无效的 token")
-    user_id = payload.get("sub")
-    async with get_db_session() as db:
-        stmt = select(User).where(User.id == user_id)
-        result = await db.execute(stmt)
-        user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="用户不存在")
-    return user
-
-
 @router.get("/{task_id}/events")
-async def stream_research_events(task_id: str, token: str | None = Query(default=None)):
+async def stream_research_events(task_id: str, current_user: Annotated[User, Depends(get_current_user)]):
     """SSE stream for research progress, logs, report and PPT outline preview."""
-
-    current_user = await _resolve_event_user(token)
 
     async def event_generator():
         last_payload = None

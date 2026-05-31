@@ -583,7 +583,7 @@ async def self_reflect(state: dict) -> dict:
         issues.append("存在未被来源支撑的断言")
 
     # 质量评分
-    quality_map = {0: "POOR", 1: "FAIR", 2: "GOOD", 3: "EXCELLENT"}
+    quality_map = {0: "EXCELLENT", 1: "GOOD", 2: "FAIR", 3: "POOR"}
     num_issues = len(issues)
     quality = quality_map.get(min(num_issues, 3), "POOR")
 
@@ -654,4 +654,4 @@ async def generate_answer_stream(state: dict) -> AsyncIterator[str]:
             yield token
     except Exception as e:
         logger.error("stream_answer_generation_failed", error=str(e))
-        yield "\n\n[生成中断，请重试]"
+        raise

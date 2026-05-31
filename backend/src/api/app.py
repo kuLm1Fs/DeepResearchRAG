@@ -40,8 +40,31 @@ async def lifespan(app: FastAPI):
         if settings.llm_cache_enabled:
             logger.warning("生产环境 LLM_CACHE_ENABLED 应为 False，建议在 .env.prod 中设置")
 
+    # Recover orphaned research tasks from previous worker incarnation
+    await _recover_orphaned_tasks()
+
     yield
     logger.info("app_shutting_down")
+
+
+async def _recover_orphaned_tasks():
+    """Mark stale 'running' research tasks as failed on startup."""
+    try:
+        from db.database import get_db_session
+        from db.models import ResearchTask
+        from sqlalchemy import update
+
+        async with get_db_session() as db:
+            result = await db.execute(
+                update(ResearchTask)
+                .where(ResearchTask.status == "running")
+                .values(status="failed", error="Worker restarted — task orphaned")
+            )
+            if result.rowcount:
+                await db.commit()
+                logger.info("orphaned_tasks_recovered", count=result.rowcount)
+    except Exception as e:
+        logger.warning("orphaned_task_recovery_failed", error=str(e))
 
 
 def create_app() -> FastAPI:

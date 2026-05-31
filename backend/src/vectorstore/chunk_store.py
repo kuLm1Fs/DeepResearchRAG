@@ -13,25 +13,11 @@ from pymilvus import (
 )
 
 from core import get_logger, settings
+from ._common import DIM, get_milvus_connection
 
 logger = get_logger(__name__)
 
 CHUNK_COLLECTION_NAME = "news_chunks"
-DIM = 1024  # BGE-large-zh embedding dimension
-
-
-def get_milvus_connection():
-    """Get or create Milvus connection."""
-    alias = "chunk_store"
-    if not connections.has_connection(alias):
-        connections.connect(
-            alias=alias,
-            host=settings.milvus_host,
-            port=settings.milvus_port,
-            user=settings.milvus_user or None,
-            password=settings.milvus_password or None,
-        )
-    return alias
 
 
 def create_chunk_schema() -> CollectionSchema:

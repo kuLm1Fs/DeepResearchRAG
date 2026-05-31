@@ -131,21 +131,3 @@ def verify_token(token: str) -> dict:
         raise jwt.InvalidTokenError("Token has expired")
     except jwt.InvalidTokenError as e:
         raise jwt.InvalidTokenError(f"Invalid token: {e}")
-
-
-def decode_token(token: str) -> Optional[dict]:
-    """
-    解码 token（不验证），用于获取 payload 而不抛异常。
-
-    Args:
-        token (str): JWT token 字符串
-
-    Returns:
-        dict | None: payload 或 None
-    """
-    try:
-        # Decode without verification - only for reading payload
-        payload = jwt.decode(token, options={"verify_signature": False})
-        return payload
-    except jwt.InvalidTokenError:
-        return None
