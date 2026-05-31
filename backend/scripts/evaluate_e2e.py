@@ -142,17 +142,24 @@ async def evaluate_single(
 
     # ── 4. LLM-as-judge ────────────────────────────────────────────
     t2 = time.perf_counter()
-    faith, rel = await asyncio.gather(
+    gold_answer = query_item.get("gold_answer")
+    judge_tasks = [
         judge.judge_faithfulness(query, answer, sources),
         judge.judge_relevance(query, answer),
-    )
+    ]
+    if gold_answer:
+        judge_tasks.append(judge.judge_correctness(query, answer, gold_answer))
+
+    judge_results = await asyncio.gather(*judge_tasks)
     judge_ms = (time.perf_counter() - t2) * 1000
 
     result["judge"] = {
-        "faithfulness": faith,
-        "relevance": rel,
+        "faithfulness": judge_results[0],
+        "relevance": judge_results[1],
         "latency_ms": round(judge_ms),
     }
+    if gold_answer and len(judge_results) > 2:
+        result["judge"]["correctness"] = judge_results[2]
 
     result["total_latency_ms"] = round(retrieval_ms + generation_ms + judge_ms)
     return result
@@ -190,12 +197,14 @@ async def run_evaluation(
     valid = [r for r in all_results if "error" not in r]
     faith_scores = [r["judge"]["faithfulness"]["score"] for r in valid if "judge" in r]
     rel_scores = [r["judge"]["relevance"]["score"] for r in valid if "judge" in r]
+    corr_scores = [r["judge"]["correctness"]["score"] for r in valid if "judge" in r and "correctness" in r.get("judge", {})]
     kw_rates = [r["retrieval"]["keyword_hit_rate"] for r in valid if "retrieval" in r]
     cov_rates = [r["citations"]["coverage_rate"] for r in valid if "citations" in r]
     latencies = [r["total_latency_ms"] for r in valid if "total_latency_ms" in r]
 
     avg_faith = avg(faith_scores)
     avg_rel = avg(rel_scores)
+    avg_corr = avg(corr_scores) if corr_scores else None
     avg_kw = avg(kw_rates)
     avg_cov = avg(cov_rates)
 
@@ -205,6 +214,25 @@ async def run_evaluation(
         and avg_rel >= TARGETS["relevance"]
         and avg_cov >= TARGETS["citation_coverage"]
     )
+
+    answer_section: dict[str, Any] = {
+        "avg_faithfulness": round(avg_faith, 2),
+        "avg_relevance": round(avg_rel, 2),
+        "faithfulness_by_difficulty": {
+            d: round(avg([r["judge"]["faithfulness"]["score"] for r in items if "judge" in r]), 2)
+            for d, items in group_by_difficulty(valid).items()
+        },
+        "relevance_by_difficulty": {
+            d: round(avg([r["judge"]["relevance"]["score"] for r in items if "judge" in r]), 2)
+            for d, items in group_by_difficulty(valid).items()
+        },
+    }
+    if avg_corr is not None:
+        answer_section["avg_correctness"] = round(avg_corr, 2)
+        answer_section["correctness_by_difficulty"] = {
+            d: round(avg([r["judge"]["correctness"]["score"] for r in items if "judge" in r and "correctness" in r.get("judge", {})]), 2)
+            for d, items in group_by_difficulty(valid).items()
+        }
 
     summary = {
         "total_queries": len(queries),
@@ -217,18 +245,7 @@ async def run_evaluation(
                 for d, items in group_by_difficulty(valid).items()
             },
         },
-        "answer": {
-            "avg_faithfulness": round(avg_faith, 2),
-            "avg_relevance": round(avg_rel, 2),
-            "faithfulness_by_difficulty": {
-                d: round(avg([r["judge"]["faithfulness"]["score"] for r in items if "judge" in r]), 2)
-                for d, items in group_by_difficulty(valid).items()
-            },
-            "relevance_by_difficulty": {
-                d: round(avg([r["judge"]["relevance"]["score"] for r in items if "judge" in r]), 2)
-                for d, items in group_by_difficulty(valid).items()
-            },
-        },
+        "answer": answer_section,
         "citations": {
             "avg_coverage_rate": round(avg_cov, 3),
             "avg_supported_claims": round(
@@ -245,7 +262,7 @@ async def run_evaluation(
 
     return {
         "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
-        "domain": "tech",
+        "domain": "finance",
         "passed": passed,
         "targets": TARGETS,
         "summary": summary,

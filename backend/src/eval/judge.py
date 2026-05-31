@@ -53,6 +53,26 @@ Rate the relevance on a scale of 1-5:
 Return ONLY a JSON object:
 {{"score": <1-5>, "reasoning": "<brief explanation>"}}"""
 
+CORRECTNESS_PROMPT = """You are evaluating whether a generated answer is correct compared to a gold standard answer.
+
+User Question: {query}
+
+Gold Standard Answer:
+{gold_answer}
+
+Generated Answer:
+{answer}
+
+Rate the correctness on a scale of 1-5:
+1 = Completely wrong or contradicts the gold answer
+2 = Major factual errors, mostly incorrect
+3 = Partially correct, some key facts right but missing or wrong on others
+4 = Mostly correct with minor inaccuracies or omissions
+5 = Fully correct, matches the gold answer in all key facts
+
+Return ONLY a JSON object:
+{{"score": <1-5>, "reasoning": "<brief explanation>"}}"""
+
 
 def _get_llm():
     """Lazy-init singleton LLM for judge calls."""
@@ -131,4 +151,19 @@ class EvalJudge:
             return _parse_score(result)
         except Exception as e:
             logger.error("relevance_judge_failed", error=str(e))
+            return {"score": 0, "reasoning": f"Judge call failed: {e}"}
+
+    async def judge_correctness(
+        self, query: str, answer: str, gold_answer: str
+    ) -> dict[str, Any]:
+        """Compare generated answer against gold standard answer (1-5)."""
+        llm = _get_llm()
+        prompt = CORRECTNESS_PROMPT.format(
+            query=query, answer=answer[:2000], gold_answer=gold_answer[:2000]
+        )
+        try:
+            result = await llm.chat([{"role": "user", "content": prompt}])
+            return _parse_score(result)
+        except Exception as e:
+            logger.error("correctness_judge_failed", error=str(e))
             return {"score": 0, "reasoning": f"Judge call failed: {e}"}

@@ -21,7 +21,7 @@ RSS_SOURCES: list[dict[str, str]] = [
     {"name": "Ars Technica", "url": "https://feeds.arstechnica.com/arstechnica/index", "language": "en", "category": "tech"},
     # 英文综合新闻源
     {"name": "BBC World", "url": "http://feeds.bbci.co.uk/news/world/rss.xml", "language": "en", "category": "news"},
-    {"name": "Reuters World", "url": "https://www.reutersagency.com/feed/?taxonomy=best-topics&post_type=best", "language": "en", "category": "news"},
+    {"name": "Reuters World", "url": "https://www.reutersagency.com/feed/?taxonomy=best-topics&post_type=best", "language": "en", "category": "finance"},
     # 中文科技/创业新闻源
     {"name": "36氪", "url": "https://36kr.com/feed", "language": "zh", "category": "tech"},
     {"name": "少数派", "url": "https://sspai.com/feed", "language": "zh", "category": "tech"},
@@ -30,6 +30,16 @@ RSS_SOURCES: list[dict[str, str]] = [
     # 中文综合新闻源
     {"name": "澎湃新闻", "url": "https://www.thepaper.cn/rss", "language": "zh", "category": "news"},
     {"name": "参考消息", "url": "http://www.cankaoxiaoxi.com/rss/", "language": "zh", "category": "news"},
+    # 英文金融源
+    {"name": "CNBC", "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html", "language": "en", "category": "finance"},
+    {"name": "Bloomberg", "url": "https://feeds.bloomberg.com/markets/news.rss", "language": "en", "category": "finance"},
+    {"name": "FT", "url": "https://www.ft.com/rss/home", "language": "en", "category": "finance"},
+    {"name": "WSJ", "url": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml", "language": "en", "category": "finance"},
+    {"name": "Yahoo Finance", "url": "https://finance.yahoo.com/news/rssindex", "language": "en", "category": "finance"},
+    # 中文金融源
+    {"name": "华尔街见闻", "url": "https://wallstreetcn.com/rss", "language": "zh", "category": "finance"},
+    {"name": "财新", "url": "https://rsshub.app/caixin/latest", "language": "zh", "category": "finance"},
+    {"name": "第一财经", "url": "https://rsshub.app/yicai/brief", "language": "zh", "category": "finance"},
 ]
 
 
