@@ -1,10 +1,10 @@
 import { useState, FormEvent } from 'react'
 import { login as loginApi } from '../api/client'
-import type { LoginRequest } from '../types'
+import type { LoginRequest, UserInfo } from '../types'
 
 interface Props {
   onSwitchToRegister: () => void
-  onLoginSuccess: (user: any) => void
+  onLoginSuccess: (user: UserInfo) => void
 }
 
 export default function LoginForm({ onSwitchToRegister, onLoginSuccess }: Props) {
@@ -20,8 +20,8 @@ export default function LoginForm({ onSwitchToRegister, onLoginSuccess }: Props)
     try {
       const res = await loginApi({ email, password } as LoginRequest)
       onLoginSuccess(res.user)
-    } catch (err: any) {
-      setError(err.message || 'Login failed')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Login failed')
     } finally {
       setLoading(false)
     }

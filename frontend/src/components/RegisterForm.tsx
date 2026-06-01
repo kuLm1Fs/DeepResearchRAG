@@ -1,10 +1,10 @@
 import { useState, FormEvent } from 'react'
 import { register as registerApi } from '../api/client'
-import type { RegisterRequest } from '../types'
+import type { RegisterRequest, UserInfo } from '../types'
 
 interface Props {
   onSwitchToLogin: () => void
-  onRegisterSuccess: (user: any) => void
+  onRegisterSuccess: (user: UserInfo) => void
 }
 
 export default function RegisterForm({ onSwitchToLogin, onRegisterSuccess }: Props) {
@@ -23,8 +23,8 @@ export default function RegisterForm({ onSwitchToLogin, onRegisterSuccess }: Pro
       if (companyName) req.company_name = companyName
       const res = await registerApi(req)
       onRegisterSuccess(res.user)
-    } catch (err: any) {
-      setError(err.message || 'Registration failed')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Registration failed')
     } finally {
       setLoading(false)
     }

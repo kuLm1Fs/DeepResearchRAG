@@ -275,7 +275,7 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
 
     abortRef.current = null
     setLoading(false)
-  }, [input, loading, onSourcesUpdate])
+  }, [input, loading, onSourcesUpdate, dateFrom, dateTo])
 
   return (
     <>
