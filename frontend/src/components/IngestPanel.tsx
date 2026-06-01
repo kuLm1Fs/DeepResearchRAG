@@ -7,6 +7,7 @@ const DATA_SOURCES = [
   { value: 'rss', label: 'RSS' },
   { value: 'hackernews', label: 'HN' },
   { value: 'huggingface', label: 'HF' },
+  { value: 'feishu', label: 'Feishu' },
 ];
 
 interface IngestPanelProps {

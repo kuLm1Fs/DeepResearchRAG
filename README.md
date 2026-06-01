@@ -7,7 +7,7 @@
 ## 功能特性
 
 ### 数据采集与处理
-- 多源金融数据采集：财经 RSS、SEC 公告、金融新闻 API、HuggingFace 金融数据集
+- 多源金融数据采集：财经 RSS、SEC 公告、金融新闻 API、HuggingFace 金融数据集、飞书知识库
 - 双语内容处理：中英文清洗、切块（RecursiveCharacterTextSplitter, chunk_size=500）、检索与问答
 - 云端 Embedding：火山引擎 API，维度 1024，批量大小 50，自动重试
 - 增量去重：基于 content_hash（SHA256）的 Milvus 增量写入
@@ -102,7 +102,7 @@ Deep Research 流程：
 │   │   ├── core/               # 日志、审计、限流、配置
 │   │   ├── db/                 # PostgreSQL 连接与模型
 │   │   ├── eval/               # LLM-as-Judge 评估模块
-│   │   ├── ingestion/          # 数据采集器（RSS、HN、HuggingFace）
+│   │   ├── ingestion/          # 数据采集器（RSS、HN、HuggingFace、飞书）
 │   │   ├── llm/                # LLM 抽象层
 │   │   ├── retrieval/          # 多路召回、融合、重排序
 │   │   └── vectorstore/        # Milvus 存储、Embedding

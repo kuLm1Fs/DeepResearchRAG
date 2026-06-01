@@ -67,7 +67,7 @@ export interface HealthResponse {
 
 // 数据导入触发请求类型
 export interface IngestTriggerRequest {
-  source?: 'rss' | 'hackernews' | 'huggingface'
+  source?: 'rss' | 'hackernews' | 'huggingface' | 'feishu'
   limit?: number
 }
 
