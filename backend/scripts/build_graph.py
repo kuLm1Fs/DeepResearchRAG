@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import json
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -48,14 +49,16 @@ async def _build_from_milvus(limit: int | None, force: bool) -> dict[str, int]:
     We read the same fields indexer.py uses, then build the graph.
     """
     from ingestion.pipeline import Pipeline  # type: ignore
-    from pymilvus import connections
+    from pymilvus import PyMilvusDeprecationWarning, connections
 
     # Connect to Milvus
-    connections.connect(
-        alias="default",
-        host=settings.milvus_host,
-        port=str(settings.milvus_port),
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", PyMilvusDeprecationWarning)
+        connections.connect(
+            alias="default",
+            host=settings.milvus_host,
+            port=str(settings.milvus_port),
+        )
 
     # We assume the collection is the default `news_articles` (matching
     # the project's indexer convention). Adjust the name if your deployment

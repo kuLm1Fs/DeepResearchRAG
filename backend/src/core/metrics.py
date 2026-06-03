@@ -16,7 +16,7 @@ class MetricsRegistry:
     def render_prometheus(self) -> str:
         lines = [
             "# TYPE rag_app_info gauge",
-            'rag_app_info{app="rag-news-intelligence"} 1',
+            'rag_app_info{app="rag-finance-intelligence"} 1',
         ]
         with self._lock:
             for name in sorted(self._counters):

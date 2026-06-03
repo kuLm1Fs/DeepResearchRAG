@@ -16,6 +16,8 @@ from ._common import DIM, get_milvus_connection
 
 logger = get_logger(__name__)
 
+# Legacy collection name retained to avoid a destructive Milvus migration.
+# The collection currently stores finance articles/documents.
 COLLECTION_NAME = "news_articles"
 
 
@@ -43,7 +45,7 @@ def filter_new_records_by_hash(
 
 
 def create_schema() -> CollectionSchema:
-    """Create the news_articles collection schema."""
+    """Create the finance document collection schema."""
     fields = [
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
         FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=DIM),

@@ -19,7 +19,7 @@ errorlog = "-"
 loglevel = "info"
 
 # Process naming
-proc_name = "rag-news-api"
+proc_name = "rag-finance-api"
 
 # Server mechanics
 preload_app = True

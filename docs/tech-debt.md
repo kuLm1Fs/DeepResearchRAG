@@ -1,4 +1,4 @@
-# RAG News Intelligence — 技术债与已知问题
+# RAG Finance Intelligence — 技术债与已知问题
 
 > 最后更新: 2026-05-31
 

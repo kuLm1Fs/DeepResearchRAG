@@ -81,6 +81,16 @@ class TestRequestBodySizeLimit:
         # 405 (Method Not Allowed) is fine — the point is it's not 413
         assert resp.status_code != 413
 
+    def test_rejects_invalid_content_length(self, client):
+        """Malformed Content-Length should get a client error, not a 500."""
+        resp = client.post(
+            "/api/auth/login",
+            content="{}",
+            headers={"Content-Type": "application/json", "Content-Length": "not-an-int"},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "Invalid Content-Length"
+
 
 class TestRateLimiting:
     """Rate limiting middleware is configured."""

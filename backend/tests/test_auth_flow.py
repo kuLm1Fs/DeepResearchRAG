@@ -40,8 +40,9 @@ class TestRegisterEndpoint:
     @patch("src.api.auth.get_db_session")
     @patch("src.api.auth._generate_id", return_value="new-user-id")
     def test_register_success(self, mock_gen_id, mock_db_session, client):
-        mock_session = AsyncMock()
+        mock_session = MagicMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+        mock_session.flush = AsyncMock()
         mock_db_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_db_session.return_value.__aexit__ = AsyncMock(return_value=False)
 

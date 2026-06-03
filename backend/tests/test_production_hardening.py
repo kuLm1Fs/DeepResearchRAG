@@ -1,6 +1,6 @@
 import sys
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -61,17 +61,17 @@ class RefreshTokenHardeningTests(unittest.TestCase):
         requested_token = "refresh-token-from-client"
         matching = Token(
             token_hash=auth_api.hash_token(requested_token),
-            expires_at=datetime.utcnow() + timedelta(days=1),
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1),
         )
         latest_but_wrong = Token(
             token_hash=auth_api.hash_token("different-refresh-token"),
-            expires_at=datetime.utcnow() + timedelta(days=1),
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1),
         )
 
         selected = auth_api.select_valid_refresh_token(
             requested_token,
             [latest_but_wrong, matching],
-            now=datetime.utcnow(),
+            now=datetime.now(timezone.utc).replace(tzinfo=None),
         )
 
         self.assertIs(selected, matching)
@@ -84,7 +84,7 @@ class RefreshTokenHardeningTests(unittest.TestCase):
                 self.revoked = revoked
 
         requested_token = "refresh-token-from-client"
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         tokens = [
             Token(auth_api.hash_token(requested_token), now + timedelta(days=1), revoked=True),
             Token(auth_api.hash_token(requested_token), now - timedelta(seconds=1), revoked=False),

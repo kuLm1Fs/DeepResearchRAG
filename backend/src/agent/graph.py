@@ -1,5 +1,6 @@
 import asyncio
 import time
+from threading import Lock
 from typing import AsyncIterator, Awaitable, Callable
 
 from langgraph.graph import END, StateGraph
@@ -217,13 +218,16 @@ def create_agent_graph() -> StateGraph:
 
 # 编译图
 compiled_graph = None
+_compiled_graph_lock = Lock()
 
 
 def get_compiled_graph():
     global compiled_graph
     if compiled_graph is None:
-        graph = create_agent_graph()
-        compiled_graph = graph.compile()
+        with _compiled_graph_lock:
+            if compiled_graph is None:
+                graph = create_agent_graph()
+                compiled_graph = graph.compile()
     return compiled_graph
 
 

@@ -267,7 +267,7 @@ npm run build         # Production build
 
 ```bash
 cd backend
-python scripts/seed_data.py            # Import HuggingFace ag_news sample data
+python scripts/seed_financebench.py    # Import FinanceBench SEC QA/evidence data
 python scripts/evaluate_retrieval.py   # Retrieval quality evaluation (target Precision@5 >= 0.8)
 ```
 

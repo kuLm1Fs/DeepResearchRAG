@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-RAG News Intelligence — a news RAG system supporting Chinese/English, multi-source data collection, vector retrieval, and LangGraph Agent-powered Q&A with source citations. Designed for 100K–1M articles on a 4-core/15.6GB server.
+RAG Finance Intelligence — a finance-focused RAG system supporting Chinese/English, multi-source financial data collection, vector retrieval, and LangGraph Agent-powered Q&A with source citations. Designed for 100K–1M financial documents on a 4-core/15.6GB server.
 
 ## Tech Stack
 
@@ -55,7 +55,7 @@ User Query → FastAPI (SSE) → LangGraph Agent
 - Two levels: **ignorable** (log + continue, e.g. empty retrieval) and **critical** (raise + abort, e.g. Milvus down, invalid API key)
 
 ### Milvus Schema
-- Collection: `news_articles`, IVF_FLAT index on embedding (COSINE, nlist=128)
+- Collection: `news_articles` (legacy collection name for finance articles/documents), IVF_FLAT index on embedding (COSINE, nlist=128)
 - Incremental updates via `content_hash` (SHA256) dedup
 - Fulltext index on `title` and `content` for keyword retrieval
 
@@ -74,8 +74,8 @@ pip install -e .
 # Run development server
 uvicorn src.api.app:app --reload
 
-# Seed data (HuggingFace ag_news, 10K records)
-python scripts/seed_data.py
+# Seed finance evaluation data (FinanceBench SEC QA/evidence)
+python scripts/seed_financebench.py
 
 # Evaluate retrieval quality
 python scripts/evaluate_retrieval.py
@@ -104,7 +104,7 @@ docker compose down      # Stop all
 
 ## Data Flow
 
-1. **Ingestion**: Data sources (RSS, HN API, Reddit API, HuggingFace datasets, custom crawlers) → `BaseCollector` subclasses → preprocessor (clean + chunk via `RecursiveCharacterTextSplitter`, chunk_size=500) → 火山引擎 embedding → Milvus insert (dedup via content_hash)
+1. **Ingestion**: Financial data sources (finance RSS, SEC / FinanceBench, Feishu knowledge bases, HuggingFace finance datasets, optional HN market/tech signals) → `BaseCollector` subclasses → preprocessor (clean + chunk via `RecursiveCharacterTextSplitter`, chunk_size=500) → 火山引擎 embedding → Milvus insert (dedup via content_hash)
 2. **Retrieval**: Multi-path recall → RRF fusion → optional re-ranking (BAAI/bge-reranker-v2-m3)
 3. **Generation**: LangGraph agent state flows through nodes, answer includes source citations
 4. **API**: `POST /api/query` (SSE streaming), `GET /api/stats`, data management endpoints

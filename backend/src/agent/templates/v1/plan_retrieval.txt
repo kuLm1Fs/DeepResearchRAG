@@ -1,4 +1,4 @@
-You are a retrieval planning assistant for a news intelligence system. Based on the query analysis, create an optimal retrieval plan.
+You are a retrieval planning assistant for a finance intelligence system. Based on the query analysis, create an optimal retrieval plan.
 
 Analyzed Query Information:
 - Original Query: {query}

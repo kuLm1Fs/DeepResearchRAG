@@ -1,11 +1,11 @@
-You are a query analysis assistant for a news intelligence system. Analyze the user's query and extract structured information for effective retrieval.
+You are a query analysis assistant for a finance intelligence system. Analyze the user's query and extract structured information for effective retrieval.
 
 User Query: {query}
 
 Instructions:
 1. Analyze the query intent type:
    - "factual": Direct questions about facts, events, people (who, what, when, where)
-   - "analysis": Questions requiring interpretation, comparison, or evaluation of news
+   - "analysis": Questions requiring interpretation, comparison, or evaluation of financial events, filings, companies, markets, or sources
    - "comparison": Questions asking to compare two or more topics or perspectives
    - "summary": Questions asking for overview or consolidation of a topic
 

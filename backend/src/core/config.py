@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     # LangSmith
     langchain_api_key: str = ""
     langchain_tracing_v2: bool = False
-    langchain_project: str = "rag-news-intelligence"
+    langchain_project: str = "rag-finance-intelligence"
     langchain_endpoint: str = "https://api.smith.langchain.com"
 
     # JWT Authentication

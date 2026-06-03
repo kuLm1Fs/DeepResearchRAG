@@ -1,6 +1,8 @@
 import json
 import sys
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +15,27 @@ from src.agent.runtime import AgentRuntime, NodePolicy
 
 
 class AgentJsonParsingTests(unittest.IsolatedAsyncioTestCase):
+    def test_compiled_graph_is_initialized_once_under_concurrency(self):
+        compile_count = 0
+
+        class FakeGraph:
+            def compile(self):
+                nonlocal compile_count
+                time.sleep(0.02)
+                compile_count += 1
+                return object()
+
+        agent_graph.compiled_graph = None
+        try:
+            with patch.object(agent_graph, "create_agent_graph", return_value=FakeGraph()):
+                with ThreadPoolExecutor(max_workers=8) as executor:
+                    results = list(executor.map(lambda _: agent_graph.get_compiled_graph(), range(8)))
+
+            self.assertEqual(compile_count, 1)
+            self.assertTrue(all(result is results[0] for result in results))
+        finally:
+            agent_graph.compiled_graph = None
+
     async def test_analyze_query_accepts_fenced_json_from_llm(self):
         class FakeLLM:
             async def chat(self, messages):

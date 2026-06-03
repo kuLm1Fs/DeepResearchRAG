@@ -70,8 +70,8 @@ async def _recover_orphaned_tasks():
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
-        title="RAG News Intelligence API",
-        description="News RAG system with LangGraph Agent",
+        title="RAG Finance Intelligence API",
+        description="Finance RAG system with LangGraph Agent",
         version="0.1.0",
         lifespan=lifespan,
     )
@@ -111,7 +111,7 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     async def root():
-        return {"message": "RAG News Intelligence API", "version": "0.1.0"}
+        return {"message": "RAG Finance Intelligence API", "version": "0.1.0"}
 
     return app
 

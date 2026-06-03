@@ -17,8 +17,8 @@ export default function AuthPage({ onAuthSuccess }: Props) {
           <div className="brand-mark" style={{ width: '56px', height: '56px', margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 800, color: 'var(--accent)' }}>
             R
           </div>
-          <h1 className="auth-title">RAG News</h1>
-          <p className="auth-subtitle">AI-powered news intelligence</p>
+          <h1 className="auth-title">RAG Finance</h1>
+          <p className="auth-subtitle">AI-powered finance intelligence</p>
         </div>
         {mode === 'login' ? (
           <LoginForm

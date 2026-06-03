@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from ..auth import hash_password, verify_password, create_access_token, create_refresh_token, decode_access_token
 from ..core import get_logger, settings, write_audit_log
+from ..core.time import utc_now_naive
 from ..db import get_db_session
 from ..db.models import Company, User, RefreshToken
 from .app import limiter
@@ -46,7 +47,7 @@ def select_valid_refresh_token(
     now: datetime | None = None,
 ):
     """Return the stored refresh token row that exactly matches the client token."""
-    now = now or datetime.utcnow()
+    now = now or utc_now_naive()
     for token in tokens:
         if token.revoked:
             continue
@@ -152,7 +153,7 @@ async def register(req: RegisterRequest, request: Request, background_tasks: Bac
             id=_generate_id("rtok"),
             user_id=user_id,
             token_hash=token_hash,
-            expires_at=datetime.utcnow() + timedelta(days=7),
+            expires_at=utc_now_naive() + timedelta(days=7),
         )
         db.add(rt)
         await db.flush()
@@ -205,7 +206,7 @@ async def login(req: LoginRequest, request: Request, background_tasks: Backgroun
             raise HTTPException(status_code=403, detail="账号已被禁用")
 
         # 更新 last_login
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = utc_now_naive()
 
         # 生成 tokens
         access_token = create_access_token({"sub": user.id, "company_id": user.company_id})
@@ -217,7 +218,7 @@ async def login(req: LoginRequest, request: Request, background_tasks: Backgroun
             id=_generate_id("rtok"),
             user_id=user.id,
             token_hash=token_hash,
-            expires_at=datetime.utcnow() + timedelta(days=7),
+            expires_at=utc_now_naive() + timedelta(days=7),
         )
         db.add(rt)
 

@@ -1,6 +1,8 @@
 """Shared constants and connection helpers for Milvus vector stores."""
 
-from pymilvus import connections
+import warnings
+
+from pymilvus import PyMilvusDeprecationWarning, connections
 
 from core import settings
 
@@ -17,12 +19,14 @@ def get_milvus_connection(alias: str = "default") -> str:
     Returns:
         The connection alias string.
     """
-    if not connections.has_connection(alias):
-        connections.connect(
-            alias=alias,
-            host=settings.milvus_host,
-            port=settings.milvus_port,
-            user=settings.milvus_user or None,
-            password=settings.milvus_password or None,
-        )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", PyMilvusDeprecationWarning)
+        if not connections.has_connection(alias):
+            connections.connect(
+                alias=alias,
+                host=settings.milvus_host,
+                port=settings.milvus_port,
+                user=settings.milvus_user or None,
+                password=settings.milvus_password or None,
+            )
     return alias

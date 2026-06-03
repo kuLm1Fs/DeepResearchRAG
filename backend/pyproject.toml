@@ -1,7 +1,7 @@
 [project]
-name = "rag-news-intelligence"
+name = "rag-finance-intelligence"
 version = "0.1.0"
-description = "RAG News Intelligence — multi-source news RAG system with LangGraph Agent"
+description = "RAG Finance Intelligence — multi-source financial RAG system with LangGraph Agent"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

@@ -23,8 +23,8 @@ def redact_sensitive(logger, method_name, event_dict):
 
 
 def add_timestamp(logger, method_name, event_dict):
-    import datetime
-    event_dict["timestamp"] = datetime.datetime.utcnow().isoformat()
+    from .time import utc_now_iso
+    event_dict["timestamp"] = utc_now_iso()
     return event_dict
 
 

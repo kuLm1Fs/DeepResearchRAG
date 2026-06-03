@@ -1,4 +1,4 @@
-# RAG News Intelligence — TODO
+# RAG Finance Intelligence — TODO
 
 > 本文件已合并根目录 `TODO.md` 与原 `docs/todo.md`。现在只保留这一份根目录 TODO。
 >
@@ -6,9 +6,9 @@
 
 ## 当前进度总览
 
-- [x] News RAG 基础工程骨架已完成：FastAPI、React、Milvus、PostgreSQL、认证、采集器、LangGraph、LLM 客户端。
-- [x] News RAG 问答主链路已有实现：查询 API、SSE 流式返回、来源面板、Milvus 检索、LLM 生成。
-- [ ] News RAG 端到端稳定性仍需验证：本地服务、真实 API key、真实 Milvus 数据、前后端完整查询流程。
+- [x] Finance RAG 基础工程骨架已完成：FastAPI、React、Milvus、PostgreSQL、认证、采集器、LangGraph、LLM 客户端。
+- [x] Finance RAG 问答主链路已有实现：查询 API、SSE 流式返回、来源面板、Milvus 检索、LLM 生成。
+- [ ] Finance RAG 端到端稳定性仍需验证：本地服务、真实 API key、真实 Milvus 数据、前后端完整查询流程。
 - [x] Deep Research 核心功能产品化：writer 生成 Markdown 报告 + PPT 大纲/逐页内容，API 完整链路（planner → retriever → analyst → checker → writer）已接入。
 - [x] 自动测试通过：`uv run pytest` 当前全量后端测试通过。
 
@@ -105,9 +105,9 @@
 - [x] 实现本地 embedding cache 类
 - [ ] 使用真实 API key 验证返回 1024 维向量
 
-### News Collection
+### Finance Collection
 
-- [x] 定义 `news_articles` Collection schema
+- [x] 定义 `news_articles` Collection schema（遗留命名，当前承载金融文档/文章）
 - [x] 配置向量索引（IVF_FLAT + COSINE）
 - [x] 实现向量搜索
 - [x] 实现批量插入
@@ -124,7 +124,7 @@
 
 ### 数据导入
 
-- [x] HuggingFace AG News seed 脚本
+- [x] FinanceBench seed 脚本
 - [x] DatasetCollector 采集器
 - [ ] 验证 Milvus 中已成功写入 1 万条记录
 - [ ] 建立可重复的数据初始化命令和验收脚本
@@ -147,7 +147,7 @@
 
 ---
 
-## 阶段 4 — News RAG LangGraph Agent
+## 阶段 4 — Finance RAG LangGraph Agent
 
 ### LLM 与 Prompt
 
@@ -359,8 +359,8 @@
 
 | 里程碑 | 状态 | 验收标准 |
 |--------|------|---------|
-| M1: News RAG 骨架 | 已完成 | 后端、前端、Milvus、LLM、基础 Agent 代码就绪 |
-| M2: News RAG 可演示 | 待验证 | 前后端完整查询流程跑通，答案带来源 |
+| M1: Finance RAG 骨架 | 已完成 | 后端、前端、Milvus、LLM、基础 Agent 代码就绪 |
+| M2: Finance RAG 可演示 | 待验证 | 前后端完整查询流程跑通，答案带来源 |
 | M3: Deep Research 骨架 | 已完成 | schema、认证、research graph、tool 函数和 API 入口就绪 |
 | M4: Deep Research MVP | 未完成 | planner → retriever → analyst → checker → writer 完整报告闭环 |
 | M5: ToB MVP | 未完成 | 登录、配额、任务历史、报告预览、质量评估、部署文档 |

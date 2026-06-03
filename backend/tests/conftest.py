@@ -1,4 +1,4 @@
-"""Shared test fixtures for RAG News Intelligence backend tests."""
+"""Shared test fixtures for RAG Finance Intelligence backend tests."""
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock

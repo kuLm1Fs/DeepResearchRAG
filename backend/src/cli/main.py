@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 @click.version_option(version="0.1.0")
 def cli():
     """
-    RAG News Intelligence CLI
+    RAG Finance Intelligence CLI
 
     数据采集、查询和统计工具
     """

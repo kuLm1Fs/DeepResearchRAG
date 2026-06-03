@@ -293,7 +293,7 @@ export default function ChatWindow({ onSourcesUpdate, onGraphFactsUpdate, extern
         {messages.length === 0 && (
           <div className="empty-state">
             <h2>Ask me anything</h2>
-            <p>Search through news articles and get answers with source citations.</p>
+            <p>Search through financial documents and get answers with source citations.</p>
           </div>
         )}
 
@@ -359,7 +359,7 @@ export default function ChatWindow({ onSourcesUpdate, onGraphFactsUpdate, extern
             ref={textareaRef}
             id="promptInput"
             rows={1}
-            placeholder="Ask a question about the news..."
+            placeholder="Ask a question about markets, companies, filings, or financial news..."
             aria-label="输入消息"
             value={input}
             onChange={e => setInput(e.target.value)}

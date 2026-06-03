@@ -57,7 +57,7 @@ function AppContent() {
               R
             </div>
             <div>
-              <strong>RAG News</strong>
+              <strong>RAG Finance</strong>
               <span>AI intelligence</span>
             </div>
           </div>
@@ -102,8 +102,8 @@ function AppContent() {
       <main className="chat-panel">
         <header className="chat-header">
           <div>
-            <p className="eyebrow">RAG-powered news intelligence</p>
-            <h1>RAG News</h1>
+            <p className="eyebrow">RAG-powered finance intelligence</p>
+            <h1>RAG Finance</h1>
             <p className="header-copy">Deep research or quick Q&amp;A — your call.</p>
           </div>
           <div className="header-actions">
