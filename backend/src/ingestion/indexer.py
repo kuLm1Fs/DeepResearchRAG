@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Any
 
-from core import get_logger
+from core import get_logger, settings
 from ingestion.chunker import chunk_article
 from vectorstore import MilvusStore, embed_texts_async
 
@@ -20,8 +20,14 @@ async def index_articles(
     batch_size: int = 50,
     user_id: str = "",
     company_id: str = "",
+    build_graph: bool = True,
 ) -> dict[str, int]:
-    """Chunk articles, embed chunks, and insert them into Milvus."""
+    """Chunk articles, embed chunks, insert into Milvus, then build the graph.
+
+    Graph building is best-effort: any failure is logged and surfaced in
+    ``stats["graph_errors"]`` so the caller can see it happened, but the
+    vector insert is the source of truth and is not rolled back.
+    """
     store = store or MilvusStore()
     chunks: list[dict[str, Any]] = []
 
@@ -56,7 +62,14 @@ async def index_articles(
             )
             chunks.append(chunk)
 
-    stats = {"articles": len(articles), "chunks": len(chunks), "inserted": 0}
+    stats = {
+        "articles": len(articles),
+        "chunks": len(chunks),
+        "inserted": 0,
+        "graph_entities": 0,
+        "graph_relations": 0,
+        "graph_errors": 0,
+    }
     if not chunks:
         return stats
 
@@ -71,4 +84,24 @@ async def index_articles(
     inserted_ids = store.insert(records)
     stats["inserted"] = len(inserted_ids)
     logger.info("articles_indexed", **stats)
+
+    # Graph build is best-effort: vector path is authoritative.
+    if build_graph and settings.graph_enabled and articles:
+        try:
+            # Lazy import: keeps neo4j out of the import-time graph for
+            # environments that don't use the graph layer.
+            from graph.builder import build_graph_for_articles
+
+            graph_stats = await build_graph_for_articles(articles)
+            stats["graph_entities"] = graph_stats.get("entities_upserted", 0)
+            stats["graph_relations"] = graph_stats.get("relations_upserted", 0)
+            logger.info("graph_build_attached", **graph_stats)
+        except Exception as e:
+            stats["graph_errors"] += 1
+            logger.warning(
+                "graph_build_skipped_after_index",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+
     return stats

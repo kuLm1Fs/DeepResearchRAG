@@ -75,6 +75,11 @@ class IngestTriggerRequest(BaseModel):
     limit: int | None = Field(default=None, description="Limit number of articles to collect")
     fetch_full_text: bool = Field(default=True, description="Use trafilatura to fetch full article text")
     index: bool = Field(default=True, description="Embed and insert collected articles into Milvus")
+    build_graph: bool = Field(
+        default=True,
+        description="Build / extend the knowledge graph in Neo4j after Milvus insert. "
+        "Honors GRAPH_ENABLED env var; failures are isolated and do not roll back the vector write.",
+    )
 
 
 class IngestTriggerResponse(BaseModel):
@@ -85,6 +90,10 @@ class IngestTriggerResponse(BaseModel):
     articles_collected: int = 0
     chunks_indexed: int = 0
     records_inserted: int = 0
+    graph_entities: int = 0
+    graph_relations: int = 0
+    graph_skipped: int = 0
+    graph_errors: int = 0
 
 
 class IngestTaskResponse(BaseModel):
@@ -94,6 +103,10 @@ class IngestTaskResponse(BaseModel):
     articles_collected: int = 0
     chunks_indexed: int = 0
     records_inserted: int = 0
+    graph_entities: int = 0
+    graph_relations: int = 0
+    graph_skipped: int = 0
+    graph_errors: int = 0
     error: str | None = None
 
 

@@ -132,6 +132,7 @@ async def run_ingest_task(
                 articles,
                 user_id=user_id,
                 company_id=company_id,
+                build_graph=request.build_graph,
             )
 
         async with get_db_session() as db:
@@ -141,11 +142,22 @@ async def run_ingest_task(
                     articles_collected=len(articles),
                     chunks_indexed=index_stats.get("chunks", 0),
                     records_inserted=index_stats.get("inserted", 0),
+                    graph_entities=index_stats.get("graph_entities", 0),
+                    graph_relations=index_stats.get("graph_relations", 0),
+                    graph_errors=index_stats.get("graph_errors", 0),
                     finished_at=func.now(),
                 )
             )
             await db.commit()
-        logger.info("ingestion_completed", task_id=task_id, source=request.source, articles=len(articles))
+        logger.info(
+            "ingestion_completed",
+            task_id=task_id,
+            source=request.source,
+            articles=len(articles),
+            graph_entities=index_stats.get("graph_entities", 0),
+            graph_relations=index_stats.get("graph_relations", 0),
+            graph_errors=index_stats.get("graph_errors", 0),
+        )
     except Exception as e:
         async with get_db_session() as db:
             await db.execute(
@@ -467,6 +479,9 @@ async def ingest_task_status(task_id: str, current_user=Depends(get_current_user
         articles_collected=task.articles_collected,
         chunks_indexed=task.chunks_indexed,
         records_inserted=task.records_inserted,
+        graph_entities=task.graph_entities,
+        graph_relations=task.graph_relations,
+        graph_errors=task.graph_errors,
         error=task.error,
     )
 
@@ -496,6 +511,9 @@ async def ingest_task_list(current_user=Depends(get_current_user)):
             articles_collected=t.articles_collected,
             chunks_indexed=t.chunks_indexed,
             records_inserted=t.records_inserted,
+            graph_entities=t.graph_entities,
+            graph_relations=t.graph_relations,
+            graph_errors=t.graph_errors,
             error=t.error,
         )
         for t in tasks

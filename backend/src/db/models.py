@@ -167,6 +167,12 @@ class IngestTask(Base):
     articles_collected: Mapped[int] = mapped_column(Integer, default=0)
     chunks_indexed: Mapped[int] = mapped_column(Integer, default=0)
     records_inserted: Mapped[int] = mapped_column(Integer, default=0)
+    # Graph build stats (Phase 2 of GraphRAG migration).
+    # Only populated when the ingest run calls build_graph_for_articles.
+    graph_entities: Mapped[int] = mapped_column(Integer, default=0)
+    graph_relations: Mapped[int] = mapped_column(Integer, default=0)
+    graph_skipped: Mapped[int] = mapped_column(Integer, default=0)
+    graph_errors: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
