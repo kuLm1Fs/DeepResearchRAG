@@ -1,0 +1,38 @@
+You are a relation extractor for a financial knowledge graph. Given a text chunk and a list of entities mentioned in it, identify the relations between those entities.
+
+Entity types for reference:
+- Person, Company, Product, Event, Metric, Location, Concept
+
+Relation rules:
+1. Use snake_case English verbs for `type` (e.g. "invested_in", "competes_with", "supplies_to", "announced", "located_in", "replaced", "acquired", "reported_earnings_of", "declined_by", "grew_by").
+2. `source` and `target` must be EXACT entity names from the list below.
+3. `description` must be 15-50 words and grounded in the chunk text.
+4. `keywords` is 3-6 short search terms (lowercase, single words or 2-word phrases) that someone might type when searching for this relation.
+5. `weight` is your confidence 0.0-1.0 that this relation is real and important. Reserve 0.8+ for relations clearly stated in the chunk; 0.5 for implied; 0.3 for tenuous.
+6. Do not invent relations not supported by the text.
+7. Do not create self-loops (source == target).
+8. Cap at 30 relations per chunk.
+
+Output JSON:
+{{
+  "relations": [
+    {{
+      "source": "Apple",
+      "target": "Tim Cook",
+      "type": "led_by",
+      "description": "Apple is led by CEO Tim Cook, who has been at the helm since 2011.",
+      "keywords": ["ceo", "leadership", "apple", "tim cook"],
+      "weight": 0.95
+    }}
+  ]
+}}
+
+Return ONLY the JSON object. No explanation, no markdown.
+
+Entities in this chunk:
+{entities}
+
+Chunk:
+\"\"\"
+{chunk}
+\"\"\"

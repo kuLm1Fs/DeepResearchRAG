@@ -6,8 +6,11 @@ from core import get_logger, settings
 logger = get_logger(__name__)
 
 # Get prompt directory (with version switching)
-def get_prompt_dir() -> Path:
-    version = settings.prompt_version
+def get_prompt_dir(version: str | None = None) -> Path:
+    """Resolve the prompt directory for a given version (defaults to
+    ``settings.prompt_version``). Falls back to ``v1`` if the requested
+    version doesn't exist on disk."""
+    version = version or settings.prompt_version
     prompt_dir = settings.prompt_dir / version
 
     # Fallback to v1 if version doesn't exist
@@ -18,18 +21,19 @@ def get_prompt_dir() -> Path:
     return prompt_dir
 
 
-def load_prompt(name: str, **kwargs: Any) -> str:
+def load_prompt(name: str, version: str | None = None, **kwargs: Any) -> str:
     """
     Load a prompt template and format with provided variables.
 
     Args:
         name: Template filename (without .txt extension)
+        version: Optional prompt version override (defaults to settings.prompt_version)
         **kwargs: Variables to format the template with
 
     Returns:
         Formatted prompt string
     """
-    prompt_dir = get_prompt_dir()
+    prompt_dir = get_prompt_dir(version)
     template_path = prompt_dir / f"{name}.txt"
 
     if not template_path.exists():
@@ -43,7 +47,7 @@ def load_prompt(name: str, **kwargs: Any) -> str:
     if settings.debug:
         logger.debug("prompt_loaded",
             prompt_name=name,
-            prompt_version=settings.prompt_version,
+            prompt_version=version or settings.prompt_version,
             prompt_length=len(formatted),
             variables={k: str(v)[:100] for k, v in kwargs.items()},
         )

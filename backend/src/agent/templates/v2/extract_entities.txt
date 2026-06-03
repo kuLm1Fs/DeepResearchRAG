@@ -1,0 +1,32 @@
+You are an entity extractor for a financial knowledge graph. Given a text chunk from a news article, identify the salient entities it mentions and return them as a JSON object.
+
+Entity types (use EXACTLY these strings):
+- Person: individuals (executives, analysts, public figures)
+- Company: corporations, financial institutions, listed companies
+- Product: products, services, indices, ETFs
+- Event: dated events (earnings calls, IPOs, M&A, lawsuits)
+- Metric: financial metrics (revenue, EPS, P/E ratio, market cap)
+- Location: countries, cities, regions, stock exchanges
+- Concept: abstract ideas (inflation, ESG, quantitative easing, sector themes)
+
+Rules:
+1. Extract ONLY entities that are clearly grounded in the chunk text. Do not invent.
+2. Each entity needs a short `description` of 15-50 words capturing the role/relevance of this entity in the chunk.
+3. Cap at 20 entities per chunk. Prefer the most newsworthy / specific.
+4. If the same real-world entity appears multiple times (e.g. "Apple", "Apple Inc.", "AAPL"), extract ONE entry using the most common surface form.
+5. Do NOT extract generic English words like "report", "market", "year", "company" as Concept entities.
+
+Output JSON:
+{{
+  "entities": [
+    {{"name": "Apple", "type": "Company", "description": "Cupertino-based iPhone maker whose Q3 earnings beat estimates."}},
+    {{"name": "Tim Cook", "type": "Person", "description": "Apple CEO who announced the Q3 results on the call."}}
+  ]
+}}
+
+Return ONLY the JSON object. No explanation, no markdown.
+
+Chunk:
+\"\"\"
+{chunk}
+\"\"\"
