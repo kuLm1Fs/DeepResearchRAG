@@ -2,6 +2,7 @@ from .retriever import MultiPathRetriever, reciprocal_rank_fusion
 from .fusion import fusion
 from .boost import boost_results, calculate_time_decay, calculate_source_quality
 from .reranker import CrossEncoderReranker
+from .graph_retriever import GraphRetriever
 
 __all__ = [
     "MultiPathRetriever",
@@ -11,4 +12,5 @@ __all__ = [
     "calculate_time_decay",
     "calculate_source_quality",
     "CrossEncoderReranker",
+    "GraphRetriever",
 ]

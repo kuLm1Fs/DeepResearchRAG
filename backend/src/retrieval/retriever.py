@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from core import RetrievalError, get_logger
 from vectorstore import MilvusStore, embed_texts_async
@@ -7,6 +7,9 @@ from vectorstore import MilvusStore, embed_texts_async
 from .boost import boost_results
 from .fusion import reciprocal_rank_fusion
 from .reranker import CrossEncoderReranker
+
+if TYPE_CHECKING:
+    from .graph_retriever import GraphRetriever
 
 logger = get_logger(__name__)
 
@@ -63,44 +66,55 @@ def combine_expr(base_expr: str | None, filter_expr: str | None) -> str | None:
 
 class MultiPathRetriever:
     """
-    Multi-path retriever combining semantic, keyword, and title-match retrieval.
+    Multi-path retriever combining semantic, keyword, title-match, and (optional) graph retrieval.
 
     Paths:
-    1. Semantic: Vector similarity search
-    2. Keyword: Fulltext search on title and content
-    3. Title match: Exact/near-exact title matching
+    1. Semantic: Vector similarity search (Milvus)
+    2. Keyword: Fulltext search on title and content (Milvus)
+    3. Title match: Exact/near-exact title matching (Milvus)
+    4. Graph (optional, Phase 3 of GraphRAG): Dual-level entity+relation
+       search over Neo4j, fed back as a 4th ranked list for RRF fusion.
 
-    Results are fused using RRF (Reciprocal Rank Fusion).
+    Results are fused using RRF (Reciprocal Rank Fusion). When the graph
+    path is enabled its weight is taken from the same ratio as the other
+    three, with semantic down-weighted to make room.
     """
 
     def __init__(
         self,
         store: MilvusStore,
-        semantic_weight: float = 0.5,
-        keyword_weight: float = 0.3,
-        title_weight: float = 0.2,
+        semantic_weight: float = 0.4,
+        keyword_weight: float = 0.2,
+        title_weight: float = 0.15,
+        graph_weight: float = 0.25,
         semantic_limit: int = 20,
         keyword_limit: int = 20,
         title_limit: int = 10,
+        graph_limit: int = 10,
         rerank_enabled: bool = True,
         rerank_candidate_multiplier: int = 4,
+        graph_retriever: "GraphRetriever | None" = None,
     ):
         self.store = store
         self.semantic_weight = semantic_weight
         self.keyword_weight = keyword_weight
         self.title_weight = title_weight
+        self.graph_weight = graph_weight
         self.semantic_limit = semantic_limit
         self.keyword_limit = keyword_limit
         self.title_limit = title_limit
+        self.graph_limit = graph_limit
         self.rerank_enabled = rerank_enabled
         self.rerank_candidate_multiplier = rerank_candidate_multiplier
         self.reranker = CrossEncoderReranker()
+        self.graph_retriever = graph_retriever
 
     async def retrieve(
         self,
         query: str,
         top_k: int = 5,
         filters: dict[str, Any] | None = None,
+        strategy: str = "hybrid",
     ) -> list[dict[str, Any]]:
         """
         Retrieve relevant documents using multi-path search.
@@ -109,6 +123,9 @@ class MultiPathRetriever:
             query: Search query text
             top_k: Number of final results to return
             filters: Optional filters (language, category, source, etc.)
+            strategy: One of "hybrid" (default), "vector" (skip graph), or
+                "graph" (only graph path, no Milvus). Phase 4 routes by
+                intent; this is the API surface for that decision.
 
         Returns:
             List of relevant documents with scores
@@ -117,17 +134,36 @@ class MultiPathRetriever:
             query=query,
             top_k=top_k,
             filters=filters,
+            strategy=strategy,
         )
 
         try:
             filter_expr = build_filter_expr(filters)
 
-            # Run all three paths in parallel
-            semantic_results, keyword_results, title_results = await asyncio.gather(
-                self._semantic_search(query, filter_expr=filter_expr),
-                self._keyword_search(query, filter_expr=filter_expr),
-                self._title_match(query, filter_expr=filter_expr),
-            )
+            # Strategy dispatch. "vector" runs only the three Milvus
+            # paths; "graph" runs only the graph path; "hybrid" runs all
+            # four with RRF fusion.
+            if strategy == "vector":
+                semantic_results, keyword_results, title_results = await asyncio.gather(
+                    self._semantic_search(query, filter_expr=filter_expr),
+                    self._keyword_search(query, filter_expr=filter_expr),
+                    self._title_match(query, filter_expr=filter_expr),
+                )
+                graph_results: list[dict[str, Any]] = []
+            elif strategy == "graph":
+                semantic_results, keyword_results, title_results = [], [], []
+                graph_results = await self._graph_search(query) if self.graph_retriever else []
+            else:  # hybrid
+                tasks = [
+                    self._semantic_search(query, filter_expr=filter_expr),
+                    self._keyword_search(query, filter_expr=filter_expr),
+                    self._title_match(query, filter_expr=filter_expr),
+                ]
+                if self.graph_retriever:
+                    tasks.append(self._graph_search(query))
+                gathered = await asyncio.gather(*tasks)
+                semantic_results, keyword_results, title_results = gathered[0], gathered[1], gathered[2]
+                graph_results = gathered[3] if self.graph_retriever else []
 
             # Keep an in-process filter as a defensive check for test fakes or stores
             # that do not enforce scalar expressions.
@@ -135,20 +171,46 @@ class MultiPathRetriever:
                 semantic_results = self._apply_filters(semantic_results, filters)
                 keyword_results = self._apply_filters(keyword_results, filters)
                 title_results = self._apply_filters(title_results, filters)
+                # graph_results come from Neo4j which doesn't know about
+                # user_id/company_id yet; skip filter there.
 
             # Log individual path results
             logger.info("paths_completed",
                 semantic_count=len(semantic_results),
                 keyword_count=len(keyword_results),
                 title_count=len(title_results),
+                graph_count=len(graph_results),
+                strategy=strategy,
             )
 
             # RRF fusion
-            fused = reciprocal_rank_fusion(
-                [semantic_results, keyword_results, title_results],
-                weights=[self.semantic_weight, self.keyword_weight, self.title_weight],
-                k=60,
-            )
+            if strategy == "graph":
+                # Single-path shortcut — no fusion needed.
+                fused = graph_results
+            elif strategy == "vector":
+                fused = reciprocal_rank_fusion(
+                    [semantic_results, keyword_results, title_results],
+                    weights=[self.semantic_weight, self.keyword_weight, self.title_weight],
+                    k=60,
+                )
+            else:  # hybrid
+                if self.graph_retriever and graph_results:
+                    fused = reciprocal_rank_fusion(
+                        [semantic_results, keyword_results, title_results, graph_results],
+                        weights=[
+                            self.semantic_weight,
+                            self.keyword_weight,
+                            self.title_weight,
+                            self.graph_weight,
+                        ],
+                        k=60,
+                    )
+                else:
+                    fused = reciprocal_rank_fusion(
+                        [semantic_results, keyword_results, title_results],
+                        weights=[self.semantic_weight, self.keyword_weight, self.title_weight],
+                        k=60,
+                    )
 
             # Apply boost (time decay + source quality)
             boosted = boost_results(
@@ -235,6 +297,27 @@ class MultiPathRetriever:
             return results
         except Exception as e:
             logger.warning("title_match_failed", error=str(e))
+            return []
+
+    async def _graph_search(self, query: str) -> list[dict[str, Any]]:
+        """4th path: dual-level entity + relation search via Neo4j.
+
+        Returned chunks carry the standard fields (chunk_id, content,
+        title, url, source, score) plus graph-specific trace metadata
+        (via_entities, via_relations) so downstream consumers (UI
+        GraphPanel, agent answer generation) can show "this answer was
+        reached via Apple --[invested_in]--> TSMC".
+
+        Empty list when ``graph_retriever`` is None (graph layer not
+        configured) or when the path fails — we never want a graph error
+        to break the user-facing retrieval.
+        """
+        if self.graph_retriever is None:
+            return []
+        try:
+            return await self.graph_retriever.retrieve(query, top_k=self.graph_limit)
+        except Exception as e:
+            logger.warning("graph_search_failed", error=str(e), error_type=type(e).__name__)
             return []
 
     def _apply_filters(self, results: list[dict[str, Any]], filters: dict[str, Any]) -> list[dict[str, Any]]:
