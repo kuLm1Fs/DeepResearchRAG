@@ -3,13 +3,42 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any
 
-from core import get_logger, LLMError
+from core import get_logger, LLMError, settings
 
 from .runtime import AgentRuntime
 from .schemas import QueryAnalysis, RetrievalEvaluation
 from .templates import load_prompt
 
 logger = get_logger(__name__)
+
+
+# Known entity vocabulary used by the routing rules. Pulled from the
+# alias dictionary so an alias hit ("AAPL", "Apple", "苹果公司") all map
+# to "苹果" and trigger the entity-aware branch. We accept the freshness
+# trade-off here (this won't include entities first seen at retrieval
+# time) in exchange for skipping a Neo4j roundtrip per query.
+def _build_entity_vocabulary() -> set[str]:
+    # ``graph.normalizer`` and ``src.graph.normalizer`` are the same .py
+    # file but Python tracks them as separate sys.modules entries. When
+    # earlier tests load one spelling, a later ``from graph.normalizer
+    # import …`` can raise ModuleNotFoundError. Try both — vocabulary
+    # lookup is the only reason this import exists, and we'd rather
+    # degrade to an empty vocab than crash the agent.
+    try:
+        from graph.normalizer import ALIAS_MAP
+    except ModuleNotFoundError:
+        try:
+            from src.graph.normalizer import ALIAS_MAP
+        except ModuleNotFoundError:
+            logger.warning("entity_vocabulary_unavailable_falling_back_to_empty")
+            return set()
+
+    vocab: set[str] = set()
+    for canonical, aliases in ALIAS_MAP.items():
+        vocab.add(canonical.lower())
+        for alias in aliases:
+            vocab.add(alias.lower())
+    return vocab
 
 
 def get_runtime(state: dict) -> AgentRuntime:
@@ -63,6 +92,66 @@ def parse_query_analysis(text: str, fallback_query: str) -> dict[str, Any]:
     data = parse_json_object(text)
     data.setdefault("rewritten_query", fallback_query)
     return QueryAnalysis.model_validate(data).model_dump()
+
+
+def apply_routing_rules(
+    parsed: dict[str, Any],
+    *,
+    forced_strategy: str | None = None,
+    entity_vocabulary: set[str] | None = None,
+) -> dict[str, str]:
+    """Decide the retrieval strategy for a parsed query.
+
+    Returns ``{"retrieval_strategy", "strategy_reason"}``. Rules in
+    priority order:
+
+      1. Explicit caller override (API ?strategy=…) wins unconditionally.
+      2. settings.graph_enabled=False → vector (graph layer not running).
+      3. intent ∈ {summary, analysis, comparison} → graph (multi-hop /
+         global topics — vector alone tends to surface tangentially
+         related chunks here).
+      4. intent == factual AND a keyword hits a known entity → graph.
+      5. Default → hybrid (4-path RRF). This is the floor: when in doubt
+         we trust the fusion ranker rather than committing to one side.
+
+    The "vector" strategy is reserved for explicit overrides — the rules
+    never select it by default. It's the escape hatch for users who want
+    to bypass the graph layer entirely (e.g. for ablation evals or when
+    the graph is being rebuilt).
+    """
+    if forced_strategy in ("vector", "graph", "hybrid"):
+        return {
+            "retrieval_strategy": forced_strategy,
+            "strategy_reason": "caller_override",
+        }
+
+    if not getattr(settings, "graph_enabled", True):
+        return {
+            "retrieval_strategy": "vector",
+            "strategy_reason": "graph_disabled_in_settings",
+        }
+
+    intent = (parsed.get("intent") or "factual").lower()
+    if intent in {"summary", "analysis", "comparison"}:
+        return {
+            "retrieval_strategy": "graph",
+            "strategy_reason": f"intent_is_{intent}",
+        }
+
+    if intent == "factual":
+        keywords = parsed.get("keywords") or []
+        vocab = entity_vocabulary if entity_vocabulary is not None else _build_entity_vocabulary()
+        for kw in keywords:
+            if isinstance(kw, str) and kw.lower() in vocab:
+                return {
+                    "retrieval_strategy": "graph",
+                    "strategy_reason": f"factual_keyword_matches_entity:{kw}",
+                }
+
+    return {
+        "retrieval_strategy": "hybrid",
+        "strategy_reason": "default_hybrid",
+    }
 
 
 def parse_retrieval_evaluation(text: str) -> dict[str, Any]:
@@ -328,6 +417,24 @@ async def analyze_query(state: dict) -> dict:
             "keywords": query.split(),
         }
 
+    # Apply routing rules. The LLM may suggest a strategy in its parsed
+    # output (forwards-compatible with v2 prompts) but rules override.
+    # Caller can force a strategy via state["forced_strategy"] — e.g.
+    # the API layer translates ?strategy=vector into that field.
+    routing = apply_routing_rules(
+        parsed,
+        forced_strategy=state.get("forced_strategy"),
+    )
+    parsed["retrieval_strategy"] = routing["retrieval_strategy"]
+    parsed["strategy_reason"] = routing["strategy_reason"]
+
+    logger.info(
+        "query_routed",
+        intent=parsed.get("intent"),
+        retrieval_strategy=parsed["retrieval_strategy"],
+        strategy_reason=parsed["strategy_reason"],
+    )
+
     # 构建检索 query 列表
     search_queries = [parsed.get("rewritten_query", query)]
     search_queries.extend(parsed.get("sub_queries", []))
@@ -335,6 +442,7 @@ async def analyze_query(state: dict) -> dict:
     return {
         "parsed_query": parsed,
         "search_queries": search_queries,
+        "search_strategy": parsed["retrieval_strategy"],
     }
 
 
@@ -382,8 +490,20 @@ async def retrieve(state: dict) -> dict:
     per_query = search_plan.get("per_query", 3)
     total = search_plan.get("total", state.get("top_k", 5))
     filters = state.get("filters") or None
+    strategy = (
+        state.get("parsed_query", {}).get("retrieval_strategy")
+        or state.get("search_strategy")
+        or "hybrid"
+    )
 
-    logger.info("retrieving", num_queries=len(queries), per_query=per_query, total=total, filters=filters)
+    logger.info(
+        "retrieving",
+        num_queries=len(queries),
+        per_query=per_query,
+        total=total,
+        filters=filters,
+        strategy=strategy,
+    )
 
     retriever = get_retriever(state)
 
@@ -391,10 +511,17 @@ async def retrieve(state: dict) -> dict:
     seen_titles = set()
 
     for q in queries:
+        retrieve_kwargs: dict[str, Any] = {"top_k": per_query, "strategy": strategy}
         if filters:
-            results = await retriever.retrieve(q, top_k=per_query, filters=filters)
-        else:
-            results = await retriever.retrieve(q, top_k=per_query)
+            retrieve_kwargs["filters"] = filters
+        # Older test retrievers (FakeRetriever in test_agent_orchestration)
+        # don't accept ``strategy`` — fall back to the legacy signature
+        # rather than blowing up the agent loop.
+        try:
+            results = await retriever.retrieve(q, **retrieve_kwargs)
+        except TypeError:
+            retrieve_kwargs.pop("strategy", None)
+            results = await retriever.retrieve(q, **retrieve_kwargs)
         for r in results:
             title = r.get("title", "")
             if title not in seen_titles:
@@ -479,19 +606,29 @@ async def re_search(state: dict) -> dict:
     """用补充 query 进行额外检索，合并结果。"""
     reflection = state.get("retrieval_evaluation") or state.get("reflection", {})
     re_search_query = reflection.get("re_search_query", "")
+    strategy = (
+        state.get("parsed_query", {}).get("retrieval_strategy")
+        or state.get("search_strategy")
+        or "hybrid"
+    )
 
-    logger.info("re_searching", query=re_search_query)
+    logger.info("re_searching", query=re_search_query, strategy=strategy)
 
     if not re_search_query:
         return {"re_search_count": state.get("re_search_count", 0) + 1}
 
     retriever = get_retriever(state)
 
-    new_results = await retriever.retrieve(
-        re_search_query,
-        top_k=5,
-        filters=state.get("filters") or None,
-    )
+    retrieve_kwargs: dict[str, Any] = {
+        "top_k": 5,
+        "filters": state.get("filters") or None,
+        "strategy": strategy,
+    }
+    try:
+        new_results = await retriever.retrieve(re_search_query, **retrieve_kwargs)
+    except TypeError:
+        retrieve_kwargs.pop("strategy", None)
+        new_results = await retriever.retrieve(re_search_query, **retrieve_kwargs)
 
     # 合并去重
     existing = {r.get("title") for r in state.get("retrieval_results", [])}

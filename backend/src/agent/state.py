@@ -7,7 +7,8 @@ class AgentState(TypedDict, total=False):
     query: str                          # User's original query
     trace_id: str                       # Request trace ID
     parsed_query: dict[str, Any]        # LLM-parsed query (intent, keywords, language)
-    search_strategy: str                # Selected retrieval strategy
+    search_strategy: str                # Selected retrieval strategy: "hybrid" | "vector" | "graph"
+    forced_strategy: str | None          # Optional API-level override of routing rules
     retrieval_results: list[dict]        # Raw retrieval results
     filtered_results: list[dict]         # Filtered results
     answer: str                          # Generated answer
