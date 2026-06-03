@@ -106,6 +106,73 @@ export interface LoginRequest {
   password: string
 }
 
+// Phase 5: graph introspection types (mirror backend Pydantic models)
+export interface GraphEntityRef {
+  entity_id: string
+  name: string
+  type?: string | null
+  mention_count?: number | null
+}
+
+export interface GraphRelationRef {
+  type: string
+  target_id: string
+  target_name: string
+  target_type?: string | null
+  weight?: number | null
+  description?: string | null
+}
+
+export interface GraphEntitySubgraph {
+  entity_id: string
+  name: string
+  type?: string | null
+  description?: string | null
+  mention_count?: number | null
+  relations: GraphRelationRef[]
+  sample_chunks: Array<{
+    chunk_id: string
+    content: string
+    title: string
+    url?: string
+    source?: string
+  }>
+}
+
+export interface GraphStatsResponse {
+  enabled: boolean
+  counts: Record<string, number>
+  top_entities: GraphEntityRef[]
+}
+
+export interface GraphChunkEntity {
+  entity_id: string
+  name: string
+  type?: string | null
+  relations: Array<{ type: string; target: string }>
+}
+
+export interface GraphChunkResponse {
+  chunk_id: string
+  entities: GraphChunkEntity[]
+}
+
+export interface GraphRebuildResponse {
+  status: string
+  message: string
+  task_id?: string | null
+}
+
+// Payload of the SSE ``graph_facts`` event. Emitted once per /api/query
+// request, after ``sources``, before the answer tokens stream.
+export interface GraphFacts {
+  entities: GraphEntityRef[]
+  relations: Array<{ source: string; target: string; type: string }>
+  strategy: 'hybrid' | 'vector' | 'graph'
+  strategy_reason: string
+  highlighted_entity_ids: Record<string, string[]>
+}
+
 export interface RegisterRequest {
   email: string
   password: string

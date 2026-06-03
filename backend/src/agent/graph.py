@@ -16,6 +16,7 @@ from .nodes import (
     generate_answer_stream,
     self_reflect,
     re_search,
+    build_graph_facts,
     format_sources,
     compare_sources,
 )
@@ -271,6 +272,17 @@ async def run_agent_stream(
         sources = format_sources(state.get("retrieval_results", []))
         yield {"type": "sources", "data": sources}
 
+        # Graph facts: emit before tokens so the frontend can prep the
+        # graph panel as the answer streams in. Always emit, even if
+        # empty, so the client can distinguish "graph not used" from
+        # "graph facts not yet received" without an extra roundtrip.
+        graph_facts = build_graph_facts(
+            retrieval_results=state.get("retrieval_results", []),
+            parsed_query=state.get("parsed_query"),
+            search_strategy=state.get("search_strategy"),
+        )
+        yield {"type": "graph_facts", "data": graph_facts}
+
         # 流式生成
         async for token in generate_answer_stream(state):
             answer_parts.append(token)
@@ -278,6 +290,7 @@ async def run_agent_stream(
 
         state["answer"] = "".join(answer_parts)
         state["sources"] = sources
+        state["graph_facts"] = graph_facts
         state.update(await run_traced_node("self_reflect", self_reflect, state))
     except Exception as e:
         logger.error("stream_agent_failed", error=str(e))
@@ -290,6 +303,7 @@ async def run_agent_stream(
             "sources": sources,
             "citations": state.get("citations", []),
             "answer_reflection": state.get("answer_reflection", {}),
+            "graph_facts": state.get("graph_facts", {}),
             "trace_id": trace_id,
         },
     }

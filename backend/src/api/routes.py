@@ -32,12 +32,14 @@ from .models import (
     Source,
     StatsResponse,
 )
+from .graph import router as graph_router
 from .research import router as research_router
 
 logger = get_logger(__name__)
 router = APIRouter()
 router.include_router(auth_router)
 router.include_router(research_router)
+router.include_router(graph_router)
 
 
 def build_query_filters(request: QueryRequest, current_user) -> dict[str, Any]:

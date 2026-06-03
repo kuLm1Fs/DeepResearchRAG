@@ -203,3 +203,68 @@ GRAPH_STATS = """
 MATCH (n)
 RETURN labels(n)[0] AS label, count(n) AS count
 """.strip()
+
+# -----------------------------------------------------------------------
+# Phase 5: graph introspection queries (entity detail page / graph viz)
+# -----------------------------------------------------------------------
+
+# Subgraph around an entity, 1 or 2 hops. We cap relations to keep payloads
+# bounded for the frontend — graph viz is a browsing affordance, not retrieval.
+ENTITY_SUBGRAPH = """
+MATCH (e:Entity)
+WHERE e.name = $name OR e.entity_id = $entity_id
+OPTIONAL MATCH (e)-[r1:RELATION]-(n1:Entity)
+WITH e,
+     collect(DISTINCT {
+       type: r1.type,
+       target_id: n1.entity_id,
+       target_name: n1.name,
+       target_type: n1.type,
+       weight: r1.weight,
+       description: r1.description
+     }) AS rels_1
+OPTIONAL MATCH (e)-[m:MENTIONED_IN]->(c:Chunk)-[:PART_OF]->(d:Document)
+WITH e, rels_1,
+     collect(DISTINCT {
+       chunk_id: c.chunk_id,
+       content: c.content,
+       title: d.title,
+       url: d.url,
+       source: d.source
+     })[0..5] AS sample_chunks
+RETURN e.entity_id AS entity_id,
+       e.name AS name,
+       e.type AS type,
+       e.description AS description,
+       e.mention_count AS mention_count,
+       rels_1 AS relations,
+       sample_chunks AS sample_chunks
+""".strip()
+
+# Entities + outgoing relations for a single chunk (used by SourceCard
+# "relations" popover on the frontend).
+CHUNK_GRAPH = """
+MATCH (c:Chunk {chunk_id: $chunk_id})
+MATCH (e:Entity)-[:MENTIONED_IN]->(c)
+OPTIONAL MATCH (e)-[r:RELATION]->(other:Entity)
+WHERE (other)-[:MENTIONED_IN]->(c)
+RETURN e.entity_id AS entity_id,
+       e.name AS name,
+       e.type AS type,
+       collect(DISTINCT {
+         type: r.type,
+         target: other.name
+       }) AS relations
+""".strip()
+
+# Most-mentioned entities — for the "Browse" landing view when a user
+# hasn't asked a query yet.
+TOP_ENTITIES = """
+MATCH (e:Entity)
+RETURN e.entity_id AS entity_id,
+       e.name AS name,
+       e.type AS type,
+       e.mention_count AS mention_count
+ORDER BY e.mention_count DESC
+LIMIT $limit
+""".strip()

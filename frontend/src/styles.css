@@ -774,6 +774,140 @@ textarea::placeholder {
   margin-top: 4px;
 }
 
+/* Phase 5: graph panel + tab toggle + relation/entity chips */
+.source-panel-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.source-panel-tab {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.source-panel-tab:hover { color: var(--text); }
+.source-panel-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.source-card-entities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.source-card-entity-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--accent-soft, #eef2ff);
+  color: var(--accent, #4338ca);
+}
+.source-card-entity-chip.more {
+  background: var(--faint-soft, #f3f4f6);
+  color: var(--muted);
+}
+
+.source-card-relations {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.source-card-relations-label {
+  font-size: 10px;
+  color: var(--faint);
+  margin-right: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.source-card-relation-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  background: #f3f4f6;
+  color: #1f2937;
+  border: 1px solid #e5e7eb;
+}
+.source-card-relation-chip .rel-type {
+  color: var(--accent);
+  font-weight: 600;
+  margin: 0 2px;
+}
+
+.graph-panel {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fafafa;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 320px;
+}
+.graph-panel.empty {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--faint);
+  font-size: 12px;
+}
+.graph-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+.graph-panel-title { font-weight: 600; color: var(--text); }
+.graph-panel-meta { color: var(--faint); }
+.graph-canvas-wrap {
+  width: 100%;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #f0f0f0;
+}
+.graph-canvas-loading,
+.graph-panel-loading {
+  padding: 24px;
+  text-align: center;
+  color: var(--faint);
+  font-size: 12px;
+}
+.graph-panel-status {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+.graph-panel-status.error { color: #b91c1c; }
+.graph-panel-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.legend-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
 /* Stats section */
 .stats-grid {
   display: grid;

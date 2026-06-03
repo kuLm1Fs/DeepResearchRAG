@@ -1,4 +1,4 @@
-import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, IngestTaskResponse, QueryRequest, QueryResponse, Source, LoginRequest, RegisterRequest, AuthResponse, UserInfo, ResearchTaskResponse, FeedbackRequest, FeedbackStatsResponse } from '../types'
+import type { HealthResponse, IngestTriggerResponse, IngestStatusResponse, IngestTaskResponse, QueryRequest, QueryResponse, Source, LoginRequest, RegisterRequest, AuthResponse, UserInfo, ResearchTaskResponse, FeedbackRequest, FeedbackStatsResponse, GraphEntitySubgraph, GraphStatsResponse, GraphChunkResponse, GraphRebuildResponse } from '../types'
 
 const API_BASE = '/api'
 
@@ -250,4 +250,30 @@ export async function submitFeedback(req: FeedbackRequest): Promise<{ id: number
 
 export async function getFeedbackStats(): Promise<FeedbackStatsResponse> {
   return fetchWithErrorHandling<FeedbackStatsResponse>(`${API_BASE}/feedback/stats`)
+}
+
+// Phase 5: graph introspection API
+export async function getGraphStats(): Promise<GraphStatsResponse> {
+  return fetchWithErrorHandling<GraphStatsResponse>(`${API_BASE}/graph/stats`)
+}
+
+export async function getEntitySubgraph(name: string): Promise<GraphEntitySubgraph> {
+  // Names are part of the URL — encodeURIComponent handles spaces + CJK
+  return fetchWithErrorHandling<GraphEntitySubgraph>(
+    `${API_BASE}/graph/entity/${encodeURIComponent(name)}`
+  )
+}
+
+export async function getChunkGraph(chunkId: string): Promise<GraphChunkResponse> {
+  return fetchWithErrorHandling<GraphChunkResponse>(
+    `${API_BASE}/graph/related/${encodeURIComponent(chunkId)}`
+  )
+}
+
+export async function rebuildGraph(limit?: number): Promise<GraphRebuildResponse> {
+  return fetchWithErrorHandling<GraphRebuildResponse>(`${API_BASE}/graph/rebuild`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ limit: limit ?? null, from_milvus: true }),
+  })
 }

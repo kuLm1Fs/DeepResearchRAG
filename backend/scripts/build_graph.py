@@ -32,6 +32,16 @@ from core import configure_logging, get_logger, settings  # noqa: E402
 logger = get_logger(__name__)
 
 
+async def build_from_milvus(limit: int | None = None, force: bool = False) -> dict[str, int]:
+    """Public entrypoint: rebuild the graph from articles already in Milvus.
+
+    Used by the /api/graph/rebuild endpoint. Kept public (not ``_build_…``)
+    so it can be imported cleanly from the API layer without poking at a
+    private function.
+    """
+    return await _build_from_milvus(limit=limit, force=force)
+
+
 async def _build_from_milvus(limit: int | None, force: bool) -> dict[str, int]:
     """Pull articles from Milvus and run the graph builder.
 

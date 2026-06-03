@@ -9,11 +9,12 @@ import { HistoryPanel, addToHistory } from './components/HistoryPanel'
 import { Dashboard } from './components/Dashboard'
 import ResearchPanel from './components/ResearchPanel'
 import ErrorBoundary from './components/ErrorBoundary'
-import type { Source } from './types'
+import type { Source, GraphFacts } from './types'
 
 function AppContent() {
   const { logout, user } = useAuth()
   const [sources, setSources] = useState<Source[]>([])
+  const [graphFacts, setGraphFacts] = useState<GraphFacts | null>(null)
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
   const [externalQuery, setExternalQuery] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -33,6 +34,10 @@ function AppContent() {
       setHistoryRefreshKey(k => k + 1)
     }
   }
+
+  const handleGraphFactsUpdate = useCallback((newFacts: GraphFacts | null) => {
+    setGraphFacts(newFacts)
+  }, [])
 
   const handleQuerySelect = useCallback((query: string) => {
     setExternalQuery(query)
@@ -82,7 +87,7 @@ function AppContent() {
           <div className="section-heading">
             <h2 id="sources-title">来源 ({sources.length})</h2>
           </div>
-          <SourcePanel sources={sources} compact />
+          <SourcePanel sources={sources} compact graphFacts={graphFacts} />
         </section>
 
         <section className="sidebar-section" aria-labelledby="ingest-title">
@@ -115,7 +120,12 @@ function AppContent() {
           <ResearchPanel />
         ) : (
           <div className="chat-content">
-            <ChatWindow onSourcesUpdate={handleSourcesUpdate} externalQuery={externalQuery} onExternalQueryConsumed={() => setExternalQuery('')} />
+            <ChatWindow
+              onSourcesUpdate={handleSourcesUpdate}
+              onGraphFactsUpdate={handleGraphFactsUpdate}
+              externalQuery={externalQuery}
+              onExternalQueryConsumed={() => setExternalQuery('')}
+            />
           </div>
         )}
       </main>

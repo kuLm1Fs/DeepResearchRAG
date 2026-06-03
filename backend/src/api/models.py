@@ -48,6 +48,52 @@ class HealthResponse(BaseModel):
     llm_provider: str
 
 
+# --- Phase 5: graph introspection API ---
+class GraphEntityRef(BaseModel):
+    entity_id: str
+    name: str
+    type: str | None = None
+    mention_count: int | None = None
+
+
+class GraphRelationRef(BaseModel):
+    type: str
+    target_id: str
+    target_name: str
+    target_type: str | None = None
+    weight: float | None = None
+    description: str | None = None
+
+
+class GraphEntitySubgraph(BaseModel):
+    entity_id: str
+    name: str
+    type: str | None
+    description: str | None
+    mention_count: int | None
+    relations: list[GraphRelationRef] = Field(default_factory=list)
+    sample_chunks: list[dict] = Field(default_factory=list)
+
+
+class GraphChunkEntity(BaseModel):
+    entity_id: str
+    name: str
+    type: str | None
+    relations: list[dict] = Field(default_factory=list)
+
+
+class GraphStatsResponse(BaseModel):
+    enabled: bool
+    counts: dict[str, int] = Field(default_factory=dict)
+    top_entities: list[GraphEntityRef] = Field(default_factory=list)
+
+
+class GraphRebuildResponse(BaseModel):
+    status: str
+    message: str
+    task_id: str | None = None
+
+
 # SSE Event types
 class SSETokenEvent(BaseModel):
     type: str = "token"
@@ -67,6 +113,23 @@ class SSEDoneEvent(BaseModel):
 class SSEErrorEvent(BaseModel):
     type: str = "error"
     data: str
+
+
+class SSEGraphFactsEvent(BaseModel):
+    """Emitted once per /api/query request, after sources, so the frontend
+    can prep the graph panel before the answer streams. ``data`` shape::
+
+        {
+          "entities": [{"entity_id", "name", "type"}, ...],
+          "relations": [{"source", "target", "type"}, ...],
+          "strategy": "hybrid" | "vector" | "graph",
+          "strategy_reason": "...",
+          "highlighted_entity_ids": [...]   # chunk_id -> entity_ids mapping
+        }
+    """
+
+    type: str = "graph_facts"
+    data: dict
 
 
 # Ingest endpoint models

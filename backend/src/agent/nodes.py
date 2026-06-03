@@ -202,6 +202,69 @@ def format_sources(results: list[dict]) -> list[dict]:
     return sources
 
 
+def build_graph_facts(
+    retrieval_results: list[dict],
+    parsed_query: dict[str, Any] | None,
+    search_strategy: str | None = None,
+) -> dict[str, Any]:
+    """Build a compact graph_facts payload for the SSE graph_facts event.
+
+    Pulls ``via_entities`` and ``via_relations`` off each retrieval result
+    (these are populated by ``GraphRetriever`` when a chunk came from the
+    graph path) and dedupes into a small enough payload for the frontend
+    graph viewer. If the query didn't go through the graph path, the
+    payload is still returned but with empty ``entities``/``relations``
+    lists so the frontend can show "graph not used for this query".
+    """
+    entity_index: dict[str, dict[str, Any]] = {}
+    relation_index: dict[tuple[str, str, str], dict[str, Any]] = {}
+    chunk_entity_map: dict[str, list[str]] = {}
+
+    for r in retrieval_results or []:
+        chunk_id = r.get("chunk_id") or r.get("id") or ""
+        # via_entities is a list of entity *names* when the graph retriever
+        # surfaces a chunk — we don't have types/ids at this layer without
+        # a Neo4j roundtrip, so we send names and let the frontend resolve
+        # them via the /api/graph/entity/{name} endpoint on demand.
+        for ent in r.get("via_entities") or []:
+            if not isinstance(ent, str) or not ent:
+                continue
+            if ent not in entity_index:
+                entity_index[ent] = {
+                    "entity_id": ent,  # best-effort; resolved on click
+                    "name": ent,
+                    "type": None,
+                }
+            if chunk_id:
+                chunk_entity_map.setdefault(chunk_id, [])
+                if ent not in chunk_entity_map[chunk_id]:
+                    chunk_entity_map[chunk_id].append(ent)
+
+        for rel in r.get("via_relations") or []:
+            if not isinstance(rel, dict):
+                continue
+            src = rel.get("source") or rel.get("source_entity")
+            tgt = rel.get("target") or rel.get("target_entity")
+            rtype = rel.get("type")
+            if not (src and tgt and rtype):
+                continue
+            key = (src, tgt, rtype)
+            if key not in relation_index:
+                relation_index[key] = {
+                    "source": src,
+                    "target": tgt,
+                    "type": rtype,
+                }
+
+    return {
+        "entities": list(entity_index.values()),
+        "relations": list(relation_index.values()),
+        "strategy": search_strategy or (parsed_query or {}).get("retrieval_strategy") or "hybrid",
+        "strategy_reason": (parsed_query or {}).get("strategy_reason", ""),
+        "highlighted_entity_ids": chunk_entity_map,
+    }
+
+
 def split_answer_claims(answer: str) -> list[str]:
     """Split generated prose into simple claim-sized sentences."""
     normalized = " ".join(line.strip("-* \t") for line in answer.splitlines())

@@ -14,6 +14,7 @@ class AgentState(TypedDict, total=False):
     answer: str                          # Generated answer
     sources: list[dict]                  # Source citations
     citations: list[dict]                # Claim-to-source citation bindings
+    graph_facts: dict[str, Any]          # Phase 5: entities/relations surfaced for the graph viewer
     retrieval_evaluation: dict[str, Any] # Retrieval relevance and re-search decision
     retrieval_quality_gate: dict[str, Any] # Hard retrieval quality signals
     answer_reflection: dict[str, Any]    # Answer quality self-reflection result

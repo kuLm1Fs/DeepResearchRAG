@@ -234,6 +234,46 @@ class Neo4jStore:
             rows = await session.execute_read(_stats_tx, {})
         return {row["label"]: row["count"] for row in rows if row.get("label")}
 
+    # ------------------------------------------------------------------
+    # Phase 5: introspection queries for the graph viz API
+    # ------------------------------------------------------------------
+
+    @_retry
+    async def entity_subgraph(
+        self, name: str, entity_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """Return the 1-hop neighborhood of an entity.
+
+        ``name`` is the public-facing canonical name (e.g. "苹果"). The
+        optional ``entity_id`` lets callers disambiguate when two entity
+        types share a name (the index is ``name`` so we accept either).
+        """
+        driver = await self._get_driver()
+        async with driver.session(database=self._database) as session:
+            rows = await session.execute_read(
+                _entity_subgraph_tx,
+                {"name": name, "entity_id": entity_id or name},
+            )
+        return rows[0] if rows else None
+
+    @_retry
+    async def chunk_graph(self, chunk_id: str) -> list[dict[str, Any]]:
+        driver = await self._get_driver()
+        async with driver.session(database=self._database) as session:
+            rows = await session.execute_read(
+                _chunk_graph_tx, {"chunk_id": chunk_id}
+            )
+        return rows
+
+    @_retry
+    async def top_entities(self, limit: int = 20) -> list[dict[str, Any]]:
+        driver = await self._get_driver()
+        async with driver.session(database=self._database) as session:
+            rows = await session.execute_read(
+                _top_entities_tx, {"limit": limit}
+            )
+        return rows
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -341,4 +381,19 @@ def _fulltext_search_relations_tx(tx: Any, params: dict) -> list[dict]:
 
 def _stats_tx(tx: Any, params: dict) -> list[dict]:
     result = tx.run(graph_schema.GRAPH_STATS, **params)
+    return [dict(record) for record in result]
+
+
+def _entity_subgraph_tx(tx: Any, params: dict) -> list[dict]:
+    result = tx.run(graph_schema.ENTITY_SUBGRAPH, **params)
+    return [dict(record) for record in result]
+
+
+def _chunk_graph_tx(tx: Any, params: dict) -> list[dict]:
+    result = tx.run(graph_schema.CHUNK_GRAPH, **params)
+    return [dict(record) for record in result]
+
+
+def _top_entities_tx(tx: Any, params: dict) -> list[dict]:
+    result = tx.run(graph_schema.TOP_ENTITIES, **params)
     return [dict(record) for record in result]

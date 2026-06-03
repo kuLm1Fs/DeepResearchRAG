@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getAccessToken, submitFeedback } from '../api/client'
 import ErrorBoundary from './ErrorBoundary'
-import type { Message, Source } from '../types'
+import type { Message, Source, GraphFacts } from '../types'
 
 const AVATAR_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23171312'/%3E%3Ctext x='50' y='68' font-size='50' font-weight='bold' text-anchor='middle' fill='white'%3ER%3C/text%3E%3C/svg%3E"
 
@@ -84,11 +84,12 @@ const MessageBubble = memo(function MessageBubble({ message, onFeedback }: Messa
 
 interface ChatWindowProps {
   onSourcesUpdate: (sources: Source[]) => void
+  onGraphFactsUpdate?: (facts: GraphFacts | null) => void
   externalQuery?: string
   onExternalQueryConsumed?: () => void
 }
 
-export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQueryConsumed }: ChatWindowProps) {
+export default function ChatWindow({ onSourcesUpdate, onGraphFactsUpdate, externalQuery, onExternalQueryConsumed }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -167,6 +168,9 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
 
     const userMessage = input.trim()
     setInput('')
+    // Reset graph panel from the previous query so it doesn't show
+    // stale entities while the new request is in flight.
+    onGraphFactsUpdate?.(null)
     setMessages(prev => [...prev, { role: 'user', content: userMessage }])
     setLoading(true)
 
@@ -231,6 +235,11 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
 
                 if (event.type === 'sources') {
                   onSourcesUpdate(event.data)
+                } else if (event.type === 'graph_facts') {
+                  // The backend emits this once per request, after sources,
+                  // before any tokens. The panel uses it to show the
+                  // entities/relations traversed by the graph retrieval path.
+                  onGraphFactsUpdate?.(event.data as GraphFacts)
                 } else if (event.type === 'token') {
                   assistantMessage += event.data
                   updateLastAssistantMessage(assistantMessage)
@@ -275,7 +284,7 @@ export default function ChatWindow({ onSourcesUpdate, externalQuery, onExternalQ
 
     abortRef.current = null
     setLoading(false)
-  }, [input, loading, onSourcesUpdate, dateFrom, dateTo])
+  }, [input, loading, onSourcesUpdate, onGraphFactsUpdate, dateFrom, dateTo])
 
   return (
     <>
