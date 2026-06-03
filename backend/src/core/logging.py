@@ -8,6 +8,7 @@ SENSITIVE_PATTERNS = [
     (re.compile(r"sk-[a-zA-Z0-9]{20,}"), "sk-***REDACTED***"),
     (re.compile(r"Bearer\s+\S+"), "Bearer ***REDACTED***"),
     (re.compile(r"volcengine[_-]?api[_-]?key[=:]\s*\S+", re.IGNORECASE), "volcengine_api_key=***REDACTED***"),
+    (re.compile(r"neo4j[_-]?password[=:]\s*\S+", re.IGNORECASE), "neo4j_password=***REDACTED***"),
 ]
 
 

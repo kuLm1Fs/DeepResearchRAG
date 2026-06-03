@@ -84,6 +84,19 @@ class Settings(BaseSettings):
     feishu_wiki_space_ids: str = ""  # comma-separated; empty = all accessible
     feishu_api_base: str = "https://open.feishu.cn/open-apis"
 
+    # Neo4j (GraphRAG knowledge graph store)
+    # Override NEO4J_URI in Docker to bolt://neo4j:7687
+    neo4j_uri: str = "bolt://localhost:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = ""
+    neo4j_database: str = "neo4j"
+    # Graph build behavior
+    graph_enabled: bool = True
+    graph_entity_min_description_length: int = 10
+    graph_max_entities_per_chunk: int = 20
+    graph_max_relations_per_chunk: int = 30
+    graph_extraction_batch_size: int = 8
+
     # Prompt versioning
     prompt_version: str = "v1"
 

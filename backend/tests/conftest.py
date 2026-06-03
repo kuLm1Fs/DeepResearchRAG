@@ -27,6 +27,12 @@ def _test_env(monkeypatch):
     monkeypatch.setenv("POSTGRES_DB", "rag_news_test")
     monkeypatch.setenv("POSTGRES_USER", "rag_test")
     monkeypatch.setenv("POSTGRES_PASSWORD", "test_pass")
+    # Neo4j (GraphRAG)
+    monkeypatch.setenv("NEO4J_URI", "bolt://localhost:7687")
+    monkeypatch.setenv("NEO4J_USER", "neo4j")
+    monkeypatch.setenv("NEO4J_PASSWORD", "test-password-for-neo4j")
+    monkeypatch.setenv("NEO4J_DATABASE", "neo4j")
+    monkeypatch.setenv("GRAPH_ENABLED", "true")
 
     # Patch settings singleton directly (env vars are read at import time)
     from src.core.config import settings

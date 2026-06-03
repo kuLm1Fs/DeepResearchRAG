@@ -25,6 +25,21 @@ class VectorStoreError(RAGError):
         super().__init__(message, ErrorLevel.CRITICAL)
 
 
+class GraphStoreError(RAGError):
+    """Neo4j / knowledge graph store error. Critical because graph queries are
+    the primary path for entity/global retrieval — but the runtime can fall
+    back to vector-only if the caller wraps with a HANDLED-level wrapper."""
+    def __init__(self, message: str):
+        super().__init__(message, ErrorLevel.CRITICAL)
+
+
+class GraphExtractionError(RAGError):
+    """LLM-based entity/relation extraction failed. Handled because vector
+    retrieval can still serve the query without the graph layer."""
+    def __init__(self, message: str):
+        super().__init__(message, ErrorLevel.HANDLED)
+
+
 class LLMError(RAGError):
     def __init__(self, message: str):
         super().__init__(message, ErrorLevel.CRITICAL)
