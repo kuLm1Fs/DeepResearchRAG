@@ -48,8 +48,8 @@ async def _build_from_milvus(limit: int | None, force: bool) -> dict[str, int]:
 
     We read the same fields indexer.py uses, then build the graph.
     """
-    from ingestion.pipeline import Pipeline  # type: ignore
     from pymilvus import PyMilvusDeprecationWarning, connections
+
 
     # Connect to Milvus
     with warnings.catch_warnings():

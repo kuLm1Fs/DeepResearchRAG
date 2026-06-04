@@ -7,7 +7,9 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, select
 from sse_starlette.sse import EventSourceResponse
 
-from core import get_logger, settings, write_audit_log, RAGError
+from core import RAGError, get_logger, settings, write_audit_log
+from core.cost_control import usage_tracker
+from core.fault_injection import FaultInjector
 from core.metrics import metrics_registry
 from db import Company, check_connection, get_db_session
 from db.models import Feedback, IngestTask
@@ -17,6 +19,7 @@ from vectorstore import MilvusStore
 from .app import limiter
 from .auth import get_current_user
 from .auth import router as auth_router
+from .graph import router as graph_router
 from .models import (
     Citation,
     FeedbackRequest,
@@ -32,7 +35,6 @@ from .models import (
     Source,
     StatsResponse,
 )
-from .graph import router as graph_router
 from .research import router as research_router
 
 logger = get_logger(__name__)
@@ -96,8 +98,9 @@ async def run_ingest_task(
     user_id: str,
     company_id: str,
 ) -> None:
-    from ingestion import Pipeline, index_articles
     from sqlalchemy import update as sql_update
+
+    from ingestion import Pipeline, index_articles
 
     async with get_db_session() as db:
         await db.execute(
@@ -183,6 +186,7 @@ async def query(body: QueryRequest, request: Request, background_tasks: Backgrou
     trace_id = request.state.trace_id
     metrics_registry.increment("rag_query_requests_total")
     filters = build_query_filters(body, current_user)
+    fault_injector = FaultInjector.from_settings(settings, request.headers)
 
     logger.info("query_request_received",
         trace_id=trace_id,
@@ -205,6 +209,7 @@ async def query(body: QueryRequest, request: Request, background_tasks: Backgrou
     if body.stream:
         # 流式路径：真正的 token 流
         from agent.graph import run_agent_stream
+        from agent.runtime import AgentRuntime
 
         async def stream_generator():
             try:
@@ -213,6 +218,12 @@ async def query(body: QueryRequest, request: Request, background_tasks: Backgrou
                     trace_id=trace_id,
                     top_k=body.top_k,
                     filters=filters,
+                    runtime=AgentRuntime(
+                        fault_injector=fault_injector,
+                        trace_id=trace_id,
+                        company_id=current_user.company_id,
+                        user_id=current_user.id,
+                    ),
                 ):
                     event_type = event["type"]
                     yield {
@@ -231,6 +242,7 @@ async def query(body: QueryRequest, request: Request, background_tasks: Backgrou
     else:
         # 非流式路径
         from agent import run_agent
+        from agent.runtime import AgentRuntime
 
         try:
             result = await run_agent(
@@ -238,15 +250,22 @@ async def query(body: QueryRequest, request: Request, background_tasks: Backgrou
                 trace_id=trace_id,
                 top_k=body.top_k,
                 filters=filters,
+                runtime=AgentRuntime(
+                    fault_injector=fault_injector,
+                    trace_id=trace_id,
+                    company_id=current_user.company_id,
+                    user_id=current_user.id,
+                ),
             )
         except Exception as e:
+            error_message = str(e)
             logger.error("non_stream_query_failed", trace_id=trace_id, error=str(e))
             metrics_registry.increment("rag_query_errors_total")
 
             async def error_generator():
                 yield {
                     "event": "error",
-                    "data": json.dumps({"type": "error", "data": str(e)}, ensure_ascii=False),
+                    "data": json.dumps({"type": "error", "data": error_message}, ensure_ascii=False),
                 }
 
             return EventSourceResponse(error_generator())
@@ -274,6 +293,16 @@ async def query(body: QueryRequest, request: Request, background_tasks: Backgrou
             }
 
         return EventSourceResponse(event_generator())
+
+
+@router.get("/cost/dashboard")
+async def get_cost_dashboard(current_user=Depends(get_current_user)):
+    """Return request-level LLM usage and cost summary for the current tenant."""
+    company_id = getattr(current_user, "company_id", None)
+    if not company_id:
+        raise HTTPException(status_code=403, detail="Company scope required")
+    metrics_registry.increment("rag_cost_dashboard_requests_total")
+    return usage_tracker.dashboard(company_id=company_id)
 
 
 @router.get("/stats", response_model=StatsResponse)

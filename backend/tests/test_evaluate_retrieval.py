@@ -37,6 +37,57 @@ class EvaluateRetrievalTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(metrics[5]["ndcg"], 0.0)
         self.assertLessEqual(metrics[5]["ndcg"], 1.0)
 
+    def test_source_recall_scores_finance_expected_sources(self):
+        results = [
+            {"doc_name": "AAPL_2023_10K", "title": "Apple 2023 Form 10-K"},
+            {"source_id": "MSFT_2023_10K", "title": "Microsoft 2023 Form 10-K"},
+            {"url": "https://example.com/NVDA_2024_10K"},
+        ]
+
+        self.assertAlmostEqual(
+            eval_script.source_recall_at_k(
+                results,
+                ["AAPL_2023_10K", "NVDA_2024_10K"],
+                3,
+            ),
+            1.0,
+        )
+        self.assertAlmostEqual(
+            eval_script.source_recall_at_k(
+                results,
+                ["AAPL_2023_10K", "NVDA_2024_10K"],
+                2,
+            ),
+            0.5,
+        )
+
+    def test_badcase_summary_and_quality_gate_fail_on_regression(self):
+        query_results = [
+            {
+                "id": "bc-001",
+                "query": "Compare Apple and Microsoft revenue",
+                "is_badcase": True,
+                "expected_sources": ["AAPL_2023_10K", "MSFT_2023_10K"],
+                "source_recall_at_5": 0.5,
+                "metrics": eval_script.calculate_metrics(["Business"] * 5, ["Business"]),
+            },
+            {
+                "id": "gold-001",
+                "query": "Apple revenue",
+                "expected_sources": ["AAPL_2023_10K"],
+                "source_recall_at_5": 1.0,
+                "metrics": eval_script.calculate_metrics(["Business"] * 5, ["Business"]),
+            },
+        ]
+
+        summary = eval_script.summarize_results(query_results, [10.0, 20.0])
+
+        self.assertEqual(summary["source_recall_at_5"], 0.75)
+        self.assertEqual(summary["badcase_regression"]["total"], 1)
+        self.assertEqual(summary["badcase_regression"]["fixed"], 0)
+        self.assertEqual(summary["badcase_regression"]["failed_ids"], ["bc-001"])
+        self.assertFalse(eval_script.quality_gate_passed(summary))
+
     async def test_evaluate_semantic_logs_search_errors_and_continues(self):
         queries = [
             {"query": "market earnings", "expected_categories": ["Business"]},
@@ -61,14 +112,22 @@ class EvaluateRetrievalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_evaluate_multipath_awaits_retriever_and_summarizes_category_precision(self):
         queries = [
-            {"query": "football score", "expected_categories": ["Sports"]},
+            {
+                "id": "gold-001",
+                "query": "football score",
+                "expected_categories": ["Sports"],
+                "expected_sources": ["sports-source-1"],
+            },
             {"query": "software update", "expected_categories": ["Sci/Tech"]},
         ]
 
         class FakeRetriever:
             async def retrieve(self, query, top_k):
                 if "football" in query:
-                    return [{"category": "Sports"}, {"category": "Business"}]
+                    return [
+                        {"category": "Sports", "source_id": "sports-source-1"},
+                        {"category": "Business"},
+                    ]
                 return [{"category": "World"}]
 
         result = await eval_script.evaluate_multipath(FakeRetriever(), queries, top_k=5)
@@ -86,6 +145,7 @@ class EvaluateRetrievalTests(unittest.IsolatedAsyncioTestCase):
             result["summary"]["category_precision_at_5"]["Sci/Tech"],
             0.0,
         )
+        self.assertAlmostEqual(result["query_results"][0]["source_recall_at_5"], 1.0)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,8 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any
 
-from core import get_logger, LLMError, settings
+from core import get_logger, settings
+from core.cost_control import BudgetExceeded
 
 from .runtime import AgentRuntime
 from .schemas import QueryAnalysis, RetrievalEvaluation
@@ -733,6 +734,9 @@ async def generate_answer(state: dict) -> dict:
 
     try:
         answer = await llm.chat(messages)
+    except BudgetExceeded as e:
+        logger.warning("answer_generation_budget_exceeded", report=e.partial_report)
+        return {"answer": _budget_partial_answer(e.partial_report), "sources": sources}
     except Exception as e:
         logger.error("answer_generation_failed", error=str(e))
         return {"answer": "抱歉，生成回答时出现错误，请重试", "sources": sources}
@@ -852,6 +856,17 @@ async def generate_answer_stream(state: dict) -> AsyncIterator[str]:
     try:
         async for token in llm.stream_chat(messages):
             yield token
+    except BudgetExceeded as e:
+        logger.warning("stream_answer_budget_exceeded", report=e.partial_report)
+        yield _budget_partial_answer(e.partial_report)
     except Exception as e:
         logger.error("stream_answer_generation_failed", error=str(e))
         raise
+
+
+def _budget_partial_answer(report: dict[str, Any]) -> str:
+    return (
+        "[partial report] Budget limit reached; returning retrieved evidence only. "
+        f"reason={report.get('reason')}; used_tokens={report.get('used_tokens')}; "
+        f"estimated_cost_usd={report.get('estimated_cost_usd')}"
+    )

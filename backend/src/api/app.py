@@ -48,21 +48,13 @@ async def lifespan(app: FastAPI):
 
 
 async def _recover_orphaned_tasks():
-    """Mark stale 'running' research tasks as failed on startup."""
+    """Requeue stale running research tasks instead of dropping them."""
     try:
-        from db.database import get_db_session
-        from db.models import ResearchTask
-        from sqlalchemy import update
+        from tasks.research import requeue_stale_research_tasks
 
-        async with get_db_session() as db:
-            result = await db.execute(
-                update(ResearchTask)
-                .where(ResearchTask.status == "running")
-                .values(status="failed", error="Worker restarted — task orphaned")
-            )
-            if result.rowcount:
-                await db.commit()
-                logger.info("orphaned_tasks_recovered", count=result.rowcount)
+        count = await requeue_stale_research_tasks()
+        if count:
+            logger.info("orphaned_tasks_requeued", count=count)
     except Exception as e:
         logger.warning("orphaned_task_recovery_failed", error=str(e))
 

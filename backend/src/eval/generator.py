@@ -23,8 +23,8 @@ _TEMPLATE_DIR = Path(__file__).parent.parent / "agent" / "templates" / "v1"
 def _get_llm():
     global _cached_llm
     if _cached_llm is None:
-        from llm import create_llm
         from core.config import settings
+        from llm import create_llm
 
         _cached_llm = create_llm(
             provider=settings.llm_provider,
@@ -49,7 +49,7 @@ async def generate_answer_only(
 
     Returns (answer_text, sources, citations).
     """
-    from agent.nodes import format_context, format_sources, bind_claim_citations
+    from agent.nodes import bind_claim_citations, format_context, format_sources
 
     if not retrieval_results:
         return "No relevant articles found.", [], []

@@ -1,11 +1,11 @@
 # Ingestion module - 数据采集模块
 from .base import BaseCollector
-from .rss_collector import RSSCollector, RSS_SOURCES
-from .hn_collector import HNCollector
-from .dataset_collector import DatasetCollector, DATASET_CONFIGS
+from .dataset_collector import DATASET_CONFIGS, DatasetCollector
 from .feishu_collector import FeishuCollector
-from .pipeline import IngestionPipeline, Pipeline
+from .hn_collector import HNCollector
 from .indexer import index_articles
+from .pipeline import IngestionPipeline, Pipeline
+from .rss_collector import RSS_SOURCES, RSSCollector
 
 __all__ = [
     "BaseCollector",

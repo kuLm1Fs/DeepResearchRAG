@@ -1,7 +1,6 @@
 """JWT token handler for access and refresh tokens."""
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 try:
     import jwt
@@ -32,7 +31,7 @@ def _get_jwt_secret() -> str:
 
 def create_access_token(
     data: dict,
-    expires_delta: Optional[timedelta] = None
+    expires_delta: timedelta | None = None
 ) -> str:
     """
     创建 JWT access_token。

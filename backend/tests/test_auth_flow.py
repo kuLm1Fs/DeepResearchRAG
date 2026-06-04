@@ -1,7 +1,8 @@
 """Tests for authentication flow: register, login, token refresh, protected endpoints."""
+from datetime import timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
-from datetime import datetime, timedelta
 
 
 class TestTokenGeneration:
@@ -24,8 +25,9 @@ class TestTokenGeneration:
         assert payload["sub"] == "user1"
 
     def test_expired_token_raises(self):
-        from src.auth.jwt_handler import create_access_token, decode_access_token
         import jwt as pyjwt
+
+        from src.auth.jwt_handler import create_access_token, decode_access_token
         token = create_access_token(
             {"sub": "user1"},
             expires_delta=timedelta(seconds=-1),

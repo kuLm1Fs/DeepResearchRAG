@@ -3,7 +3,7 @@ import asyncio
 import uuid
 from typing import Any
 
-from core import settings, get_logger
+from core import get_logger, settings
 
 from .nodes import parse_json_object
 
@@ -31,8 +31,8 @@ def _get_research_retriever():
     """Get or create a cached MultiPathRetriever."""
     global _cached_retriever
     if _cached_retriever is None:
-        from vectorstore.milvus_store import MilvusStore
         from retrieval import MultiPathRetriever
+        from vectorstore.milvus_store import MilvusStore
         store = MilvusStore()
         _cached_retriever = MultiPathRetriever(store)
     return _cached_retriever
@@ -569,7 +569,6 @@ async def _build_ppt_content(
     trends = data.get("trends", [])
     opportunities = data.get("opportunities", [])
     risks = data.get("risks", [])
-    summary = data.get("summary", "")
     audience = data.get("audience", "行业研究者")
 
     # 提取 checker 数据
@@ -839,7 +838,7 @@ async def _build_markdown_report(
         },
         {
             "role": "user",
-            "content": f"请根据以上信息生成研究报告。"
+            "content": "请根据以上信息生成研究报告。"
         }
     ]
 

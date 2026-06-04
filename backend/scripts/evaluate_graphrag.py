@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import statistics
 import sys
 import time
 from collections import defaultdict
@@ -42,7 +41,7 @@ _BACKEND_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_BACKEND_ROOT / "src"))
 sys.path.insert(0, str(_BACKEND_ROOT))
 
-from core import configure_logging, get_logger
+from core import configure_logging, get_logger  # noqa: E402
 
 configure_logging()
 logger = get_logger(__name__)
@@ -170,8 +169,6 @@ def _summarize(rows: dict[str, list[dict]]) -> dict:
     from eval.metrics import (
         aggregate_graphrag_metrics,
         entity_recall,
-        graph_path_hit_rate,
-        latency_summary,
     )
 
     summary: dict[str, dict] = {}

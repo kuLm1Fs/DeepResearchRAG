@@ -1,7 +1,6 @@
 """Tests for POST /api/query SSE streaming endpoint."""
 import json
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import MagicMock, patch
 
 
 class TestQueryEndpoint:

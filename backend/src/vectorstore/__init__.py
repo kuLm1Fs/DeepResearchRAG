@@ -1,8 +1,9 @@
-from .milvus_store import MilvusStore, COLLECTION_NAME, create_schema
 from ._common import DIM, get_milvus_connection
-from .embedding import embed_texts, embed_texts_async, CachedEmbedding
 from .chunk_store import ChunkStore
-from .industry_collection import IndustryCollection, COLLECTION_NAME as INDUSTRY_COLLECTION_NAME
+from .embedding import CachedEmbedding, embed_texts, embed_texts_async
+from .industry_collection import COLLECTION_NAME as INDUSTRY_COLLECTION_NAME
+from .industry_collection import IndustryCollection
+from .milvus_store import COLLECTION_NAME, MilvusStore, create_schema
 
 __all__ = [
     "MilvusStore",

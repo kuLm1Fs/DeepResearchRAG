@@ -1,5 +1,4 @@
 """Unit tests for graph.normalizer (no I/O, no LLM)."""
-import pytest
 
 from src.graph.normalizer import (
     ALIAS_MAP,

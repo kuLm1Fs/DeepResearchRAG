@@ -21,8 +21,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from core import configure_logging, get_logger, settings
-from ingestion.rss_collector import RSSCollector
 from ingestion.chunker import chunk_article
+from ingestion.rss_collector import RSSCollector
 from storage import MinioStore
 from vectorstore import ChunkStore, embed_texts_async
 
@@ -184,7 +184,7 @@ async def main():
     )
 
     print(f"\n{'='*50}")
-    print(f"  RSS 导入完成")
+    print("  RSS 导入完成")
     print(f"{'='*50}")
     print(f"  总文章数: {stats['total']}")
     print(f"  成功存储: {stats['stored']}")

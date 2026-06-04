@@ -1,10 +1,7 @@
 """
 MinIO 存储客户端 - 存储原始文章全文
 """
-import hashlib
-from typing import Any
 
-import structlog
 
 from core import get_logger, settings
 

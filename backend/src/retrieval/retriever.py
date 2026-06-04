@@ -1,7 +1,11 @@
 import asyncio
-from typing import Any, TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any
 
 from core import RetrievalError, get_logger
+from core.degradation import DegradationPolicy
+from core.fault_injection import FaultInjector
+from core.metrics import metrics_registry
 from vectorstore import MilvusStore, embed_texts_async
 
 from .boost import boost_results
@@ -94,6 +98,8 @@ class MultiPathRetriever:
         rerank_enabled: bool = True,
         rerank_candidate_multiplier: int = 4,
         graph_retriever: "GraphRetriever | None" = None,
+        fault_injector: FaultInjector | None = None,
+        degradation_policy: DegradationPolicy | None = None,
     ):
         self.store = store
         self.semantic_weight = semantic_weight
@@ -108,6 +114,8 @@ class MultiPathRetriever:
         self.rerank_candidate_multiplier = rerank_candidate_multiplier
         self.reranker = CrossEncoderReranker()
         self.graph_retriever = graph_retriever
+        self.fault_injector = fault_injector or FaultInjector()
+        self.degradation_policy = degradation_policy or DegradationPolicy()
 
     async def retrieve(
         self,
@@ -137,6 +145,7 @@ class MultiPathRetriever:
             strategy=strategy,
         )
 
+        started = time.perf_counter()
         try:
             filter_expr = build_filter_expr(filters)
 
@@ -231,11 +240,30 @@ class MultiPathRetriever:
                 query=query,
                 result_count=len(final_results),
             )
+            metrics_registry.observe(
+                "rag_retrieval_latency_seconds",
+                time.perf_counter() - started,
+                labels={"strategy": strategy, "status": "success"},
+            )
+            metrics_registry.set_gauge(
+                "rag_retrieval_results_count",
+                len(final_results),
+                labels={"strategy": strategy},
+            )
 
             return final_results
 
         except Exception as e:
             logger.error("retrieval_failed", query=query, error=str(e))
+            metrics_registry.observe(
+                "rag_retrieval_latency_seconds",
+                time.perf_counter() - started,
+                labels={"strategy": strategy, "status": "error"},
+            )
+            metrics_registry.increment(
+                "rag_retrieval_errors_total",
+                labels={"strategy": strategy, "error_type": type(e).__name__},
+            )
             raise RetrievalError(f"Retrieval failed: {e}")
 
     async def _semantic_search(
@@ -245,14 +273,22 @@ class MultiPathRetriever:
     ) -> list[dict[str, Any]]:
         """Vector similarity search."""
         try:
+            started = time.perf_counter()
+            self.fault_injector.maybe_raise("embedding")
             query_embedding = (await embed_texts_async([query]))[0]
-            return await self.store.search_async(
+            self.fault_injector.maybe_raise("milvus")
+            results = await self.store.search_async(
                 query_embedding=query_embedding,
                 top_k=self.semantic_limit,
                 expr=filter_expr,
             )
+            self._record_path_metrics("semantic", started, len(results), "success")
+            return results
         except Exception as e:
             logger.warning("semantic_search_failed", error=str(e))
+            self._record_path_metrics("semantic", started, 0, "error")
+            if _fault_component(e) == "milvus":
+                raise
             return []
 
     async def _keyword_search(
@@ -262,6 +298,8 @@ class MultiPathRetriever:
     ) -> list[dict[str, Any]]:
         """Keyword/fulltext search on title and content."""
         try:
+            started = time.perf_counter()
+            self.fault_injector.maybe_raise("milvus")
             results = await self.store.query_async(
                 expr=combine_expr(build_like_expr(["title", "content"], query), filter_expr),
                 output_fields=[
@@ -272,9 +310,13 @@ class MultiPathRetriever:
             )
             for r in results:
                 r["score"] = 0.5
+            self._record_path_metrics("keyword", started, len(results), "success")
             return results
         except Exception as e:
             logger.warning("keyword_search_failed", error=str(e))
+            self._record_path_metrics("keyword", started, 0, "error")
+            if _fault_component(e) == "milvus":
+                raise
             return []
 
     async def _title_match(
@@ -284,6 +326,8 @@ class MultiPathRetriever:
     ) -> list[dict[str, Any]]:
         """Exact title matching."""
         try:
+            started = time.perf_counter()
+            self.fault_injector.maybe_raise("milvus")
             results = await self.store.query_async(
                 expr=combine_expr(build_like_expr(["title"], query), filter_expr),
                 output_fields=[
@@ -294,9 +338,13 @@ class MultiPathRetriever:
             )
             for r in results:
                 r["score"] = 0.8
+            self._record_path_metrics("title", started, len(results), "success")
             return results
         except Exception as e:
             logger.warning("title_match_failed", error=str(e))
+            self._record_path_metrics("title", started, 0, "error")
+            if _fault_component(e) == "milvus":
+                raise
             return []
 
     async def _graph_search(self, query: str) -> list[dict[str, Any]]:
@@ -315,10 +363,39 @@ class MultiPathRetriever:
         if self.graph_retriever is None:
             return []
         try:
-            return await self.graph_retriever.retrieve(query, top_k=self.graph_limit)
+            started = time.perf_counter()
+            self.fault_injector.maybe_raise("graph")
+            results = await self.graph_retriever.retrieve(query, top_k=self.graph_limit)
+            self._record_path_metrics("graph", started, len(results), "success")
+            return results
         except Exception as e:
             logger.warning("graph_search_failed", error=str(e), error_type=type(e).__name__)
+            self._record_path_metrics("graph", started, 0, "error")
+            reason = _fault_scenario(e) or type(e).__name__
+            self.degradation_policy.decide(
+                component="graph",
+                failure=reason,
+                requested_strategy="hybrid",
+            )
             return []
+
+    def _record_path_metrics(
+        self,
+        path: str,
+        started: float,
+        result_count: int,
+        status: str,
+    ) -> None:
+        metrics_registry.observe(
+            "rag_retrieval_path_latency_seconds",
+            time.perf_counter() - started,
+            labels={"path": path, "status": status},
+        )
+        metrics_registry.set_gauge(
+            "rag_retrieval_path_results_count",
+            result_count,
+            labels={"path": path},
+        )
 
     def _apply_filters(self, results: list[dict[str, Any]], filters: dict[str, Any]) -> list[dict[str, Any]]:
         """Apply filters to results."""
@@ -343,3 +420,13 @@ class MultiPathRetriever:
                     continue
             filtered.append(r)
         return filtered
+
+
+def _fault_component(exc: Exception) -> str | None:
+    component = getattr(exc, "component", None)
+    return str(component) if component else None
+
+
+def _fault_scenario(exc: Exception) -> str | None:
+    scenario = getattr(exc, "scenario", None)
+    return str(scenario) if scenario else None

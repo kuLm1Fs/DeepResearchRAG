@@ -22,6 +22,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from core import configure_logging, get_logger
+from eval.datasets import load_eval_cases
 from retrieval import MultiPathRetriever
 from vectorstore import MilvusStore, embed_texts_async
 
@@ -32,6 +33,8 @@ CATEGORIES = ["Sports", "Sci/Tech", "Business", "World"]
 K_VALUES = [1, 3, 5, 10]
 BATCH_SIZE = 10
 TARGET_PRECISION_AT_5 = 0.8
+TARGET_SOURCE_RECALL_AT_5 = 0.7
+TARGET_BADCASE_FIX_RATE = 1.0
 
 TEST_QUERIES = [
     {"query": "football world cup results", "expected_categories": ["Sports"]},
@@ -101,6 +104,54 @@ def calculate_metrics(
     }
 
 
+def _normalise_source(value: Any) -> str:
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def _result_source_candidates(result: dict[str, Any]) -> list[str]:
+    fields = (
+        "source_id",
+        "doc_id",
+        "document_id",
+        "doc_name",
+        "source",
+        "url",
+        "title",
+        "file_name",
+    )
+    candidates = []
+    for field in fields:
+        value = result.get(field)
+        if value:
+            candidates.append(_normalise_source(value))
+    return [candidate for candidate in candidates if candidate]
+
+
+def source_recall_at_k(results: list[dict[str, Any]], expected_sources: list[str], k: int) -> float:
+    """Fraction of expected source ids found in the top-K results.
+
+    Finance evaluation needs evidence-level checks. Category labels are too
+    weak for SEC filings and enterprise knowledge bases, so we match expected
+    source identifiers against common result metadata fields.
+    """
+    if not expected_sources or k <= 0:
+        return 0.0
+
+    expected = [_normalise_source(source) for source in expected_sources if source]
+    if not expected:
+        return 0.0
+
+    retrieved_candidates = []
+    for result in results[:k]:
+        retrieved_candidates.extend(_result_source_candidates(result))
+
+    hits = 0
+    for source in expected:
+        if any(source in candidate or candidate in source for candidate in retrieved_candidates):
+            hits += 1
+    return hits / len(expected)
+
+
 def average_metric_dict(metric_dicts: list[dict[int, dict[str, float]]]) -> dict[int, dict[str, float]]:
     if not metric_dicts:
         return {k: {"precision": 0.0, "recall": 0.0, "ndcg": 0.0} for k in K_VALUES}
@@ -117,8 +168,8 @@ def average_metric_dict(metric_dicts: list[dict[int, dict[str, float]]]) -> dict
 def category_precision_at_5(query_results: list[dict[str, Any]]) -> dict[str, float]:
     values: dict[str, list[float]] = defaultdict(list)
     for result in query_results:
-        expected = result["expected_categories"]
-        retrieved = result["retrieved_categories"]
+        expected = result.get("expected_categories", [])
+        retrieved = result.get("retrieved_categories", [])
         for category in expected:
             values[category].append(precision_at_k(retrieved, [category], 5))
 
@@ -128,16 +179,69 @@ def category_precision_at_5(query_results: list[dict[str, Any]]) -> dict[str, fl
     }
 
 
+def badcase_regression_summary(
+    query_results: list[dict[str, Any]],
+    min_source_recall_at_5: float = TARGET_SOURCE_RECALL_AT_5,
+    min_precision_at_5: float = TARGET_PRECISION_AT_5,
+) -> dict[str, Any]:
+    badcases = [
+        result
+        for result in query_results
+        if result.get("is_badcase") or result.get("case_type") == "badcase"
+    ]
+    failed_ids = []
+    fixed = 0
+
+    for result in badcases:
+        source_recall = float(result.get("source_recall_at_5", 0.0))
+        precision = float(result.get("metrics", {}).get(5, {}).get("precision", 0.0))
+        has_expected_sources = bool(result.get("expected_sources"))
+        passes = (
+            source_recall >= min_source_recall_at_5
+            if has_expected_sources
+            else precision >= min_precision_at_5
+        )
+        if "error" in result:
+            passes = False
+
+        if passes:
+            fixed += 1
+        else:
+            failed_ids.append(str(result.get("id") or result.get("query")))
+
+    return {
+        "total": len(badcases),
+        "fixed": fixed,
+        "fix_rate": fixed / len(badcases) if badcases else 1.0,
+        "failed_ids": failed_ids,
+    }
+
+
 def summarize_results(
     query_results: list[dict[str, Any]],
     latencies_ms: list[float],
 ) -> dict[str, Any]:
     metrics = average_metric_dict([result["metrics"] for result in query_results])
+    source_recalls = [
+        float(result.get("source_recall_at_5", 0.0))
+        for result in query_results
+        if result.get("expected_sources")
+    ]
     return {
         "avg_latency_ms": sum(latencies_ms) / len(latencies_ms) if latencies_ms else 0.0,
         "metrics": metrics,
+        "source_recall_at_5": sum(source_recalls) / len(source_recalls) if source_recalls else 0.0,
+        "badcase_regression": badcase_regression_summary(query_results),
         "category_precision_at_5": category_precision_at_5(query_results),
     }
+
+
+def quality_gate_passed(summary: dict[str, Any]) -> bool:
+    precision_ok = summary["metrics"][5]["precision"] >= TARGET_PRECISION_AT_5
+    source_recall = summary.get("source_recall_at_5", 0.0)
+    source_ok = source_recall == 0.0 or source_recall >= TARGET_SOURCE_RECALL_AT_5
+    badcase_ok = summary.get("badcase_regression", {}).get("fix_rate", 1.0) >= TARGET_BADCASE_FIX_RATE
+    return precision_ok and source_ok and badcase_ok
 
 
 def extract_categories(results: list[dict[str, Any]]) -> list[str]:
@@ -167,6 +271,7 @@ async def evaluate_semantic(
         for index, item in enumerate(batch):
             query = item.get("query", "")
             expected = item.get("expected_categories", [])
+            expected_sources = item.get("expected_sources", [])
             started = time.perf_counter()
 
             try:
@@ -187,10 +292,15 @@ async def evaluate_semantic(
             latencies_ms.append(latency_ms)
             query_results.append({
                 "query": query,
+                "id": item.get("id", ""),
+                "case_type": item.get("case_type", "golden"),
+                "is_badcase": item.get("case_type") == "badcase",
                 "expected_categories": expected,
+                "expected_sources": expected_sources,
                 "retrieved_categories": retrieved_categories,
                 "results": raw_results,
                 "metrics": calculate_metrics(retrieved_categories, expected),
+                "source_recall_at_5": source_recall_at_k(raw_results, expected_sources, 5),
                 "latency_ms": latency_ms,
                 **({"error": error} if error else {}),
             })
@@ -216,6 +326,7 @@ async def evaluate_multipath(
         for item in batch:
             query = item.get("query", "")
             expected = item.get("expected_categories", [])
+            expected_sources = item.get("expected_sources", [])
             started = time.perf_counter()
 
             try:
@@ -233,10 +344,15 @@ async def evaluate_multipath(
             latencies_ms.append(latency_ms)
             query_results.append({
                 "query": query,
+                "id": item.get("id", ""),
+                "case_type": item.get("case_type", "golden"),
+                "is_badcase": item.get("case_type") == "badcase",
                 "expected_categories": expected,
+                "expected_sources": expected_sources,
                 "retrieved_categories": retrieved_categories,
                 "results": raw_results,
                 "metrics": calculate_metrics(retrieved_categories, expected),
+                "source_recall_at_5": source_recall_at_k(raw_results, expected_sources, 5),
                 "latency_ms": latency_ms,
                 **({"error": error} if error else {}),
             })
@@ -257,8 +373,7 @@ def load_test_queries(file_path: Path | None) -> list[dict[str, Any]]:
         return TEST_QUERIES
 
     try:
-        with open(file_path, encoding="utf-8") as file:
-            queries = json.load(file)
+        queries = load_eval_cases(file_path)
         logger.info("test_queries_loaded", count=len(queries), path=str(file_path))
         return queries
     except Exception as exc:
@@ -303,13 +418,14 @@ def print_category_bars(title: str, category_precision: dict[str, float]) -> Non
 def print_report(results: dict[str, Any], output_file: Path) -> None:
     semantic = results["strategies"]["semantic"]
     multipath = results["strategies"]["multipath"]
-    multipath_p5 = multipath["summary"]["metrics"][5]["precision"]
+    multipath_summary = multipath["summary"]
+    badcases = multipath_summary["badcase_regression"]
 
     print("\n" + "=" * 60)
     print("  RAG 检索质量评估报告")
     print("=" * 60)
     print(f"  测试查询数: {results['total_queries']}")
-    print("  评估维度:   Precision / Recall / NDCG @ K=1,3,5,10")
+    print("  评估维度:   Precision / Recall / NDCG / Source Recall / Badcase")
     print("=" * 60)
 
     print_strategy_report("语义检索 (Semantic)", semantic)
@@ -318,7 +434,14 @@ def print_report(results: dict[str, Any], output_file: Path) -> None:
     print_category_bars("多路检索", multipath["summary"]["category_precision_at_5"])
 
     print(f"\n  目标: Precision@5 >= {TARGET_PRECISION_AT_5:.1f}")
-    print(f"  结果: {'✅ 通过' if multipath_p5 >= TARGET_PRECISION_AT_5 else '❌ 未通过'}")
+    print(f"  目标: Source Recall@5 >= {TARGET_SOURCE_RECALL_AT_5:.1f} (仅含 expected_sources 的样本)")
+    print(f"  目标: Badcase Fix Rate >= {TARGET_BADCASE_FIX_RATE:.1f}")
+    print(f"  Source Recall@5: {multipath_summary['source_recall_at_5']:.3f}")
+    print(
+        f"  Badcase: {badcases['fixed']}/{badcases['total']} fixed "
+        f"({badcases['fix_rate']:.1%})"
+    )
+    print(f"  结果: {'✅ 通过' if results['passed'] else '❌ 未通过'}")
     print(f"\n  详细结果已保存至: {output_file}")
 
 
@@ -344,13 +467,16 @@ async def run_evaluation(args: argparse.Namespace) -> tuple[dict[str, Any], Path
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / f"{timestamp}.json"
-    multipath_p5 = multipath["summary"]["metrics"][5]["precision"]
     output_data = {
         "timestamp": timestamp,
         "total_queries": len(test_queries),
         "k_values": K_VALUES,
-        "target_precision_at_5": TARGET_PRECISION_AT_5,
-        "passed": multipath_p5 >= TARGET_PRECISION_AT_5,
+        "targets": {
+            "precision_at_5": TARGET_PRECISION_AT_5,
+            "source_recall_at_5": TARGET_SOURCE_RECALL_AT_5,
+            "badcase_fix_rate": TARGET_BADCASE_FIX_RATE,
+        },
+        "passed": quality_gate_passed(multipath["summary"]),
         "strategies": {
             "semantic": semantic,
             "multipath": multipath,

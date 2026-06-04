@@ -17,7 +17,8 @@
 """
 
 import hashlib
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 import structlog
 
@@ -43,6 +44,7 @@ class FeishuCollector(BaseCollector):
         """延迟初始化飞书 API 客户端（避免导入时就获取 token）。"""
         if self._client is None:
             from core.config import settings
+
             from .feishu_client import FeishuClient
 
             self._client = FeishuClient(
@@ -64,7 +66,7 @@ class FeishuCollector(BaseCollector):
             标准化的文章字典，兼容 chunker 和 indexer
         """
         from core.config import settings
-        from .feishu_block_parser import blocks_to_text
+
 
         client = self._get_client()
         space_ids = kwargs.get("space_ids") or settings.feishu_space_id_list

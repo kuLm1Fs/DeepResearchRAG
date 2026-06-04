@@ -1,18 +1,18 @@
 """数据库模块 - PostgreSQL async + SQLAlchemy"""
 from db.database import (
+    check_connection,
     get_db_session,
     get_engine,
     get_session_factory,
-    check_connection,
 )
 from db.models import (
+    AuditLog,
     Base,
     Company,
-    User,
-    ResearchTask,
-    UserPreference,
     RefreshToken,
-    AuditLog,
+    ResearchTask,
+    User,
+    UserPreference,
 )
 
 __all__ = [

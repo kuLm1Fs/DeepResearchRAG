@@ -1,6 +1,5 @@
 """检索结果增强：时间衰减 + 来源质量加权"""
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime
 
 # 来源质量分数（0-1），可配置化
 DEFAULT_SOURCE_QUALITY = {

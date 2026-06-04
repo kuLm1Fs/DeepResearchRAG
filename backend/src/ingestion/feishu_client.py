@@ -11,7 +11,7 @@
 
 import time
 from collections import deque
-from typing import Iterator
+from collections.abc import Iterator
 
 import httpx
 import structlog

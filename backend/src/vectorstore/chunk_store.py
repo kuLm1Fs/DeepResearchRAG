@@ -8,11 +8,11 @@ from pymilvus import (
     CollectionSchema,
     DataType,
     FieldSchema,
-    connections,
     utility,
 )
 
-from core import get_logger, settings
+from core import get_logger
+
 from ._common import DIM, get_milvus_connection
 
 logger = get_logger(__name__)

@@ -1,6 +1,5 @@
 """Password hashing utilities using bcrypt."""
 
-from typing import Optional
 
 try:
     import bcrypt

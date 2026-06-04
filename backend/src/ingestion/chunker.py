@@ -5,8 +5,6 @@ import hashlib
 import re
 from typing import Any
 
-import structlog
-
 from core import get_logger
 
 logger = get_logger(__name__)

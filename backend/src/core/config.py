@@ -78,6 +78,21 @@ class Settings(BaseSettings):
     postgres_user: str = "rag_user"
     postgres_password: str = ""
 
+    # Reliable task queue
+    redis_url: str = ""
+    research_queue_name: str = "research"
+
+    # Resilience / load-test controls
+    degradation_enabled: bool = True
+    fault_injection_enabled: bool = False
+    fault_injection_scenarios: str = ""
+
+    # Cost controls
+    cost_tracking_enabled: bool = True
+    cost_budget_enabled: bool = True
+    cost_max_tokens_per_request: int = 8_000
+    cost_max_usd_per_request: float = 0.05
+
     # Feishu (飞书)
     feishu_app_id: str = ""
     feishu_app_secret: str = ""

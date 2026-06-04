@@ -2,17 +2,18 @@
 Hacker News API 采集器
 使用 httpx 调用 HN Firebase API，无需认证即可获取最新文章
 """
+import hashlib
+from collections.abc import Iterator
+from datetime import datetime, timezone
+from typing import Any
+
 import httpx
 import structlog
-from datetime import datetime, timezone
-from typing import Any, Iterator
-import hashlib
-
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
 )
 
 from .base import BaseCollector

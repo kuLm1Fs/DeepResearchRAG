@@ -1,28 +1,28 @@
 import asyncio
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from threading import Lock
-from typing import AsyncIterator, Awaitable, Callable
 
 from langgraph.graph import END, StateGraph
 
 from core import get_logger
+from core.metrics import metrics_registry
 
-from .state import AgentState
 from .nodes import (
     analyze_query,
-    plan_retrieval,
-    retrieve,
+    build_graph_facts,
+    compare_sources,
     evaluate_relevance,
+    format_sources,
     generate_answer,
     generate_answer_stream,
-    self_reflect,
+    plan_retrieval,
     re_search,
-    build_graph_facts,
-    format_sources,
-    compare_sources,
+    retrieve,
+    self_reflect,
 )
-from .runtime import AgentRuntime
-from .runtime import NodePolicy
+from .runtime import AgentRuntime, NodePolicy
+from .state import AgentState
 
 logger = get_logger(__name__)
 
@@ -104,6 +104,12 @@ async def run_traced_node(name: str, node: AgentNode, state: AgentState) -> dict
         else:
             output = await node(state)
         status = "success"
+        duration_seconds = time.perf_counter() - started
+        metrics_registry.observe(
+            "rag_agent_node_duration_seconds",
+            duration_seconds,
+            labels={"node": name, "status": status},
+        )
         return output | {
             "node_traces": [
                 *state.get("node_traces", []),
@@ -111,7 +117,7 @@ async def run_traced_node(name: str, node: AgentNode, state: AgentState) -> dict
                     "node": name,
                     "status": status,
                     "error_level": None,
-                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                    "duration_ms": round(duration_seconds * 1000, 2),
                     "output": summarize_node_output(output),
                     "metrics": runtime_trace_metrics(runtime, name, output),
                 },
@@ -120,6 +126,16 @@ async def run_traced_node(name: str, node: AgentNode, state: AgentState) -> dict
     except Exception as exc:
         if policy.fallback_result is not None and policy.error_level != "critical":
             output = policy.fallback_result
+            duration_seconds = time.perf_counter() - started
+            metrics_registry.observe(
+                "rag_agent_node_duration_seconds",
+                duration_seconds,
+                labels={"node": name, "status": "fallback"},
+            )
+            metrics_registry.increment(
+                "rag_agent_node_errors_total",
+                labels={"node": name, "status": "fallback", "error_level": policy.error_level},
+            )
             return output | {
                 "node_traces": [
                     *state.get("node_traces", []),
@@ -127,7 +143,7 @@ async def run_traced_node(name: str, node: AgentNode, state: AgentState) -> dict
                         "node": name,
                         "status": "fallback",
                         "error_level": policy.error_level,
-                        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                        "duration_ms": round(duration_seconds * 1000, 2),
                         "error": str(exc),
                         "output": summarize_node_output(output),
                         "metrics": runtime_trace_metrics(runtime, name, output),
@@ -135,11 +151,21 @@ async def run_traced_node(name: str, node: AgentNode, state: AgentState) -> dict
                 ]
             }
 
+        duration_seconds = time.perf_counter() - started
+        metrics_registry.observe(
+            "rag_agent_node_duration_seconds",
+            duration_seconds,
+            labels={"node": name, "status": "error"},
+        )
+        metrics_registry.increment(
+            "rag_agent_node_errors_total",
+            labels={"node": name, "status": "error", "error_level": policy.error_level},
+        )
         trace_event = {
             "node": name,
             "status": "error",
             "error_level": policy.error_level,
-            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            "duration_ms": round(duration_seconds * 1000, 2),
             "error": str(exc),
             "metrics": {},
         }
@@ -238,6 +264,7 @@ async def run_agent(
     use_history: bool = False,
     history: list[dict] = None,
     filters: dict | None = None,
+    runtime: AgentRuntime | None = None,
 ) -> dict:
     """运行 Agent，返回结果。"""
     graph = get_compiled_graph()
@@ -249,6 +276,8 @@ async def run_agent(
         history=history,
         filters=filters,
     )
+    if runtime is not None:
+        initial_state["runtime"] = runtime
     return await graph.ainvoke(initial_state)
 
 
@@ -257,6 +286,7 @@ async def run_agent_stream(
     trace_id: str = "",
     top_k: int = 5,
     filters: dict | None = None,
+    runtime: AgentRuntime | None = None,
 ) -> AsyncIterator[dict]:
     """流式运行 Agent。
 
@@ -269,6 +299,8 @@ async def run_agent_stream(
     answer_parts = []
 
     state = build_initial_state(query=query, trace_id=trace_id, top_k=top_k, filters=filters)
+    if runtime is not None:
+        state["runtime"] = runtime
 
     try:
         state = await prepare_answer_state(state)

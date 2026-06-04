@@ -16,7 +16,7 @@ import json
 from typing import Any
 
 import tenacity
-from openai import APIStatusError, APITimeoutError, APIConnectionError
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from core import GraphExtractionError, get_logger, settings
 from llm.client import BaseLLM, create_llm
@@ -119,7 +119,6 @@ class EntityRelationExtractor:
     @_retry
     async def _llm_json(self, prompt: str) -> dict[str, Any]:
         """Single LLM call with JSON mode enabled."""
-        from agent.templates import load_prompt  # lazy to avoid import cycle
         # The prompt is already built; we just call LLM with json_object mode.
         messages = [{"role": "user", "content": prompt}]
         # DeepSeek/OpenAI/Qwen all support response_format={"type":"json_object"}

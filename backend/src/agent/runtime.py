@@ -2,6 +2,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core import settings
+from core.cost_control import BudgetedLLM, BudgetPolicy, UsageTracker, usage_tracker
+from core.degradation import DegradationPolicy
+from core.fault_injection import FaultInjectedLLM, FaultInjector
 
 
 @dataclass
@@ -23,13 +26,37 @@ class AgentRuntime:
 
     config: Any = field(default_factory=lambda: settings)
     node_policies: dict[str, NodePolicy] = field(default_factory=dict)
+    fault_injector: FaultInjector = field(default_factory=FaultInjector)
+    degradation_policy: DegradationPolicy | None = None
+    budget_policy: BudgetPolicy | None = None
+    usage_tracker: UsageTracker = field(default_factory=lambda: usage_tracker)
+    trace_id: str = ""
+    company_id: str = ""
+    user_id: str = ""
 
     def create_llm(self):
         from llm import create_llm
 
-        return create_llm(
+        llm = create_llm(
             provider=self.config.llm_provider,
             api_key=getattr(self.config, f"{self.config.llm_provider}_api_key"),
+            model=self.config.llm_model,
+        )
+        llm = FaultInjectedLLM(
+            llm,
+            self.fault_injector,
+            self.degradation_policy or DegradationPolicy.from_settings(self.config),
+        )
+        if not getattr(self.config, "cost_tracking_enabled", True):
+            return llm
+        return BudgetedLLM(
+            llm,
+            usage_tracker=self.usage_tracker,
+            budget_policy=self.budget_policy or BudgetPolicy.from_settings(self.config),
+            trace_id=self.trace_id,
+            company_id=self.company_id,
+            user_id=self.user_id,
+            provider=self.config.llm_provider,
             model=self.config.llm_model,
         )
 
@@ -41,6 +68,9 @@ class AgentRuntime:
         return MultiPathRetriever(
             MilvusStore(),
             graph_retriever=graph_retriever,
+            fault_injector=self.fault_injector,
+            degradation_policy=self.degradation_policy
+            or DegradationPolicy.from_settings(self.config),
         )
 
     def create_graph_retriever(self):
@@ -60,8 +90,8 @@ class AgentRuntime:
             # in nodes.py — pytest test ordering occasionally leaves only
             # the ``src.graph.X`` keys in sys.modules.
             try:
-                from graph.neo4j_store import Neo4jStore
                 from graph.builder import build_graph_for_articles  # noqa: F401 - cache for indexer
+                from graph.neo4j_store import Neo4jStore
             except ModuleNotFoundError:
                 from src.graph.neo4j_store import Neo4jStore
             from retrieval.graph_retriever import GraphRetriever

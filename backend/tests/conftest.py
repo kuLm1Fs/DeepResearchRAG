@@ -1,7 +1,7 @@
 """Shared test fixtures for RAG Finance Intelligence backend tests."""
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -43,8 +43,9 @@ def _test_env(monkeypatch):
 def client():
     """FastAPI TestClient with mocked external dependencies."""
     with patch("src.vectorstore.milvus_store.get_milvus_connection"):
-        from src.api.app import create_app
         from fastapi.testclient import TestClient
+
+        from src.api.app import create_app
         return TestClient(create_app())
 
 

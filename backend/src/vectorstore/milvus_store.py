@@ -1,17 +1,17 @@
-from typing import Any
 import asyncio
 import hashlib
+from typing import Any
 
 from pymilvus import (
     Collection,
     CollectionSchema,
     DataType,
     FieldSchema,
-    connections,
     utility,
 )
 
-from core import get_logger, settings, VectorStoreError
+from core import VectorStoreError, get_logger
+
 from ._common import DIM, get_milvus_connection
 
 logger = get_logger(__name__)

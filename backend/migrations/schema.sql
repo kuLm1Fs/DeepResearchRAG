@@ -68,8 +68,14 @@ CREATE TABLE IF NOT EXISTS research_tasks (
     company_id VARCHAR(64) REFERENCES companies(id) ON DELETE CASCADE,
     title VARCHAR(1024) NOT NULL,
     query VARCHAR(4096),                  -- 原始查询
-    status VARCHAR(32) DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+    status VARCHAR(32) DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled', 'dead_letter')),
     current_step VARCHAR(32),             -- 当前执行节点: planner/retriever/analyst/checker/writer
+    attempt_count INT DEFAULT 0,          -- 已尝试次数
+    max_attempts INT DEFAULT 3,           -- 最大重试次数
+    locked_by VARCHAR(128),               -- 当前 worker lease
+    heartbeat_at TIMESTAMP,               -- worker 心跳时间
+    cancel_requested_at TIMESTAMP,        -- 用户取消请求时间
+    dead_letter_reason TEXT,              -- 进入死信队列原因
     result_summary TEXT,                  -- 报告摘要
     result_markdown TEXT,                -- Markdown 报告全文
     result_slides JSONB,                 -- PPT 大纲 + 逐页内容 JSON
@@ -91,6 +97,9 @@ CREATE INDEX IF NOT EXISTS idx_tasks_user ON research_tasks(user_id);
 
 -- 任务状态索引（查询待处理任务用）
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON research_tasks(status);
+
+-- Worker lease / heartbeat recovery index
+CREATE INDEX IF NOT EXISTS idx_tasks_lease ON research_tasks(status, heartbeat_at);
 
 -- 更新时间索引
 CREATE INDEX IF NOT EXISTS idx_tasks_updated ON research_tasks(updated_at DESC);

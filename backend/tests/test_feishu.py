@@ -1,11 +1,12 @@
 """Tests for Feishu integration: block parser, client, collector."""
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
-
-from src.ingestion.feishu_block_parser import blocks_to_text, _extract_text_from_elements, _parse_table
-
+from src.ingestion.feishu_block_parser import (
+    _extract_text_from_elements,
+    _parse_table,
+    blocks_to_text,
+)
 
 # ─── Block Parser ───────────────────────────────────────────────
 
@@ -286,8 +287,8 @@ class TestFeishuCollector:
     """Test FeishuCollector article normalization and pipeline registration."""
 
     def test_inherits_base(self):
-        from src.ingestion.feishu_collector import FeishuCollector
         from src.ingestion.base import BaseCollector
+        from src.ingestion.feishu_collector import FeishuCollector
         assert issubclass(FeishuCollector, BaseCollector)
 
     def test_name_is_feishu(self):
@@ -361,8 +362,8 @@ class TestFeishuPipelineRegistration:
         objects due to sys.path manipulation. Pipeline uses core.config,
         tests use src.core.config — both must be patched.
         """
-        from src.core.config import settings as s1
         from core.config import settings as s2
+        from src.core.config import settings as s1
         old = (s1.feishu_app_id, s1.feishu_app_secret, s2.feishu_app_id, s2.feishu_app_secret)
         s1.feishu_app_id = s2.feishu_app_id = app_id
         s1.feishu_app_secret = s2.feishu_app_secret = app_secret
@@ -370,8 +371,8 @@ class TestFeishuPipelineRegistration:
 
     @staticmethod
     def _restore_feishu_credentials(old):
-        from src.core.config import settings as s1
         from core.config import settings as s2
+        from src.core.config import settings as s1
         s1.feishu_app_id, s1.feishu_app_secret, s2.feishu_app_id, s2.feishu_app_secret = old
 
     def test_registered_when_credentials_set(self):

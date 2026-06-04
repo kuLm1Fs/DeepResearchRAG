@@ -60,6 +60,10 @@ Thumbs.db
 data/
 *.json
 *.jsonl
+!backend/data/
+!backend/data/eval/
+!backend/data/eval/README.md
+!backend/data/eval/badcases.example.jsonl
 !frontend/package.json
 !frontend/package-lock.json
 

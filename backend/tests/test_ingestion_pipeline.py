@@ -1,14 +1,13 @@
 """Tests for data ingestion pipeline: collectors, deduplication, embedding."""
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import MagicMock, patch
 
 
 class TestRSSCollector:
     """Test RSS feed collector."""
 
     def test_rss_collector_inherits_base(self):
-        from src.ingestion.rss_collector import RSSCollector
         from src.ingestion.base import BaseCollector
+        from src.ingestion.rss_collector import RSSCollector
         assert issubclass(RSSCollector, BaseCollector)
 
     def test_rss_collector_instantiation(self):
@@ -21,8 +20,8 @@ class TestHackerNewsCollector:
     """Test Hacker News API collector."""
 
     def test_hn_collector_inherits_base(self):
-        from src.ingestion.hn_collector import HNCollector
         from src.ingestion.base import BaseCollector
+        from src.ingestion.hn_collector import HNCollector
         assert issubclass(HNCollector, BaseCollector)
 
     def test_hn_collector_instantiation(self):
@@ -35,8 +34,8 @@ class TestDatasetCollector:
     """Test HuggingFace dataset collector."""
 
     def test_dataset_collector_inherits_base(self):
-        from src.ingestion.dataset_collector import DatasetCollector
         from src.ingestion.base import BaseCollector
+        from src.ingestion.dataset_collector import DatasetCollector
         assert issubclass(DatasetCollector, BaseCollector)
 
 
@@ -54,8 +53,8 @@ class TestContentHashDedup:
     def test_content_hash_different_for_different_content(self):
         """Different content should produce different hashes."""
         import hashlib
-        h1 = hashlib.sha256("content A".encode()).hexdigest()
-        h2 = hashlib.sha256("content B".encode()).hexdigest()
+        h1 = hashlib.sha256(b"content A").hexdigest()
+        h2 = hashlib.sha256(b"content B").hexdigest()
         assert h1 != h2
 
 

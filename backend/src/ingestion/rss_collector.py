@@ -3,8 +3,9 @@ RSS 采集器 - 支持中英文新闻源
 使用 feedparser 解析 RSS/Atom 订阅源，使用 trafilatura 抓取全文
 """
 import hashlib
+from collections.abc import Iterator
 from datetime import datetime, timezone
-from typing import Any, Iterator
+from typing import Any
 
 import feedparser
 import structlog

@@ -15,11 +15,11 @@ Why not the official `neo4j-graphrag` package:
 """
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 import tenacity
-from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession
+from neo4j import AsyncDriver, AsyncGraphDatabase
 from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
 
 from core import GraphStoreError, get_logger, settings
@@ -81,7 +81,7 @@ class Neo4jStore:
             self._driver = None
             logger.info("neo4j_driver_closed")
 
-    async def __aenter__(self) -> "Neo4jStore":
+    async def __aenter__(self) -> Neo4jStore:
         await self._get_driver()
         return self
 

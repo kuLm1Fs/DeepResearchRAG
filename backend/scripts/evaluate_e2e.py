@@ -306,11 +306,11 @@ def print_report(results: dict[str, Any]) -> None:
     print(f"    Avg supported:     {c['avg_supported_claims']}")
 
     print("\n  Latency")
-    l = s["latency"]
-    print(f"    Retrieval:   {l['avg_retrieval_ms']}ms")
-    print(f"    Generation:  {l['avg_generation_ms']}ms")
-    print(f"    Judge:       {l['avg_judge_ms']}ms")
-    print(f"    Total:       {l['avg_total_ms']}ms")
+    latency = s["latency"]
+    print(f"    Retrieval:   {latency['avg_retrieval_ms']}ms")
+    print(f"    Generation:  {latency['avg_generation_ms']}ms")
+    print(f"    Judge:       {latency['avg_judge_ms']}ms")
+    print(f"    Total:       {latency['avg_total_ms']}ms")
 
     print(f"\n  Result: {'PASS' if results['passed'] else 'FAIL'}")
     print("=" * 60)

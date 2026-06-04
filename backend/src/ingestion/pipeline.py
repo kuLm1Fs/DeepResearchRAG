@@ -2,9 +2,11 @@
 采集调度器 - 管理多个采集器，支持单独触发或批量触发
 """
 import asyncio
-import structlog
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Iterator
+from typing import Any
+
+import structlog
 
 from .base import BaseCollector
 
@@ -163,8 +165,7 @@ class Pipeline:
                 try:
                     result = future.result()
                     if result:
-                        for article in result:
-                            yield article
+                        yield from result
                 except Exception as e:
                     logger.error("[Pipeline] 并行采集器执行失败", collector=name, error=str(e))
 

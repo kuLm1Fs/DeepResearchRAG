@@ -1,5 +1,6 @@
 """Tests for security middleware, rate limiting, and CORS tightening."""
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -32,10 +33,10 @@ class TestSecurityHeaders:
     def test_hsts_present_in_prod(self):
         """HSTS header should appear when env=prod."""
         # Directly test the middleware logic by patching settings.is_prod
-        from starlette.testclient import TestClient as StarletteTestClient
         from starlette.applications import Starlette
-        from starlette.routing import Route
         from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+        from starlette.testclient import TestClient as StarletteTestClient
 
         from src.core.middleware import SecurityHeadersMiddleware
 
@@ -103,8 +104,9 @@ class TestRateLimiting:
 
     def test_rate_limit_handler_registered(self):
         """RateLimitExceeded handler should be registered on the app."""
-        from src.api.app import create_app
         from slowapi.errors import RateLimitExceeded
+
+        from src.api.app import create_app
         app = create_app()
         # The exception handler dict should contain RateLimitExceeded
         assert RateLimitExceeded in app.exception_handlers

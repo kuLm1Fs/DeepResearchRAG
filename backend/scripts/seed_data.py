@@ -25,7 +25,7 @@ from datasets import load_dataset
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from tqdm import tqdm
 
-from core import configure_logging, get_logger, settings
+from core import configure_logging, get_logger
 from vectorstore import MilvusStore
 from vectorstore.embedding import embed_texts
 

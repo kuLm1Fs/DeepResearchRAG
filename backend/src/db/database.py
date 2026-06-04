@@ -1,18 +1,18 @@
 """PostgreSQL 数据库连接管理（async + SQLAlchemy）"""
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import text
 
 from core.config import settings
 from core.errors import ConfigError, DatabaseError
+
 
 # 构造 AsyncDatabaseURL
 def get_database_url() -> str:

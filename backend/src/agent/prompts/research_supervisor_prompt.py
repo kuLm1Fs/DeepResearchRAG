@@ -1,5 +1,4 @@
 """Supervisor Agent Prompt 模板"""
-from pathlib import Path
 
 PROMPT_TEMPLATE = """
 你是一个专业的研究协调者（Research Supervisor）。

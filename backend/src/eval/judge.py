@@ -78,8 +78,8 @@ def _get_llm():
     """Lazy-init singleton LLM for judge calls."""
     global _cached_llm
     if _cached_llm is None:
-        from llm import create_llm
         from core.config import settings
+        from llm import create_llm
 
         _cached_llm = create_llm(
             provider=settings.llm_provider,

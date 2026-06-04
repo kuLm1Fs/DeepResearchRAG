@@ -19,7 +19,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------
 # Neo4jStore patch path resolver
 # ---------------------------------------------------------------------
@@ -113,10 +112,10 @@ class TestGraphStatsEndpoint:
 
     @pytest.mark.asyncio
     async def test_stats_degrades_on_store_error(self):
-        from src.api import graph as graph_api
         # Use the same class instance the router imports — ``core.errors``
         # resolves to the same module the graph router sees at runtime.
         from core.errors import GraphStoreError
+        from src.api import graph as graph_api
 
         fake_store = MagicMock()
         fake_store.stats = AsyncMock(side_effect=GraphStoreError("neo4j down"))
@@ -180,8 +179,9 @@ class TestEntitySubgraphEndpoint:
 
     @pytest.mark.asyncio
     async def test_entity_subgraph_404_when_not_found(self):
-        from src.api import graph as graph_api
         from fastapi import HTTPException
+
+        from src.api import graph as graph_api
 
         fake_store = MagicMock()
         fake_store.entity_subgraph = AsyncMock(return_value=None)
@@ -195,8 +195,9 @@ class TestEntitySubgraphEndpoint:
 
     @pytest.mark.asyncio
     async def test_entity_subgraph_503_when_graph_disabled(self):
-        from src.api import graph as graph_api
         from fastapi import HTTPException
+
+        from src.api import graph as graph_api
 
         with patch.object(_router_settings(), "graph_enabled", False):
             with pytest.raises(HTTPException) as exc_info:

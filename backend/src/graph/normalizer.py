@@ -10,7 +10,7 @@ synonyms), produce a consistent canonical form so that downstream dedup via
 """
 from __future__ import annotations
 
-from .schema import Entity, EntityType, Relation, ENTITY_TYPES
+from .schema import ENTITY_TYPES, Entity, Relation
 
 # Alias dictionary. Keys are *post-strip* lowercase forms; values are the
 # canonical (Chinese-preferred) form. Add more as you discover them in your

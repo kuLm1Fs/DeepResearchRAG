@@ -1,22 +1,22 @@
 from .audit import write_audit_log
 from .config import settings
 from .errors import (
-    RAGError,
-    RetrievalError,
-    VectorStoreError,
-    GraphStoreError,
-    GraphExtractionError,
-    LLMError,
-    EmbeddingError,
     ConfigError,
     DatabaseError,
     DataError,
-    handle_error,
+    EmbeddingError,
     ErrorLevel,
+    GraphExtractionError,
+    GraphStoreError,
+    LLMError,
+    RAGError,
+    RetrievalError,
+    VectorStoreError,
+    handle_error,
 )
 from .logging import configure_logging, get_logger
 from .middleware import RequestBodySizeMiddleware, SecurityHeadersMiddleware, TraceIDMiddleware
-from .tracing import setup_langsmith, get_langsmith_client
+from .tracing import get_langsmith_client, setup_langsmith
 
 __all__ = [
     "write_audit_log",

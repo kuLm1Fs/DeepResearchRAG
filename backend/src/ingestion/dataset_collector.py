@@ -2,8 +2,10 @@
 HuggingFace 数据集采集器
 使用 datasets 库加载公开数据集，如 ag_news 新闻分类数据集
 """
+from collections.abc import Iterator
+from typing import Any
+
 import structlog
-from typing import Any, Iterator
 
 from .base import BaseCollector
 

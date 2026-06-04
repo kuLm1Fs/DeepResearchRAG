@@ -5,9 +5,7 @@ import pytest
 
 from src.graph.neo4j_store import Neo4jStore
 from src.graph.schema import (
-    DocumentNode,
     Entity,
-    EntityType,
     Relation,
 )
 
@@ -112,7 +110,7 @@ class TestUpsert:
                 s.neo4j_user = "u"
                 s.neo4j_database = "d"
                 store = Neo4jStore()
-                count = await store.upsert_relations([r1, r2])
+                await store.upsert_relations([r1, r2])
         # The internal _merge should have collapsed to 1 row
         # The execute_write was called once
         session.execute_write.assert_awaited_once()

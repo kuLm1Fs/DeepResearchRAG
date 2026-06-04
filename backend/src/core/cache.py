@@ -76,7 +76,7 @@ class FileCache:
             return default
 
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 data = json.load(f)
 
             # 检查过期时间
@@ -90,7 +90,7 @@ class FileCache:
             logger.debug("[FileCache] 缓存命中", key=key)
             return data.get("value")
 
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning("[FileCache] 读取缓存失败", key=key, error=str(e))
             return default
 
@@ -130,7 +130,7 @@ class FileCache:
             logger.debug("[FileCache] 缓存已设置", key=key, ttl=ttl)
             return True
 
-        except (IOError, TypeError) as e:
+        except (OSError, TypeError) as e:
             logger.warning("[FileCache] 设置缓存失败", key=key, error=str(e))
             return False
 
@@ -151,7 +151,7 @@ class FileCache:
                 file_path.unlink()
                 logger.debug("[FileCache] 缓存已删除", key=key)
                 return True
-            except IOError as e:
+            except OSError as e:
                 logger.warning("[FileCache] 删除缓存失败", key=key, error=str(e))
                 return False
 
@@ -169,7 +169,7 @@ class FileCache:
             try:
                 file_path.unlink()
                 count += 1
-            except IOError as e:
+            except OSError as e:
                 logger.warning("[FileCache] 删除缓存失败", path=str(file_path), error=str(e))
 
         logger.info("[FileCache] 缓存已清空", version=self.version, count=count)
@@ -191,7 +191,7 @@ class FileCache:
             return False
 
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 data = json.load(f)
 
             # 检查过期时间
@@ -202,7 +202,7 @@ class FileCache:
 
             return True
 
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return False
 
     def keys(self) -> list[str]:

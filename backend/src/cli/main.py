@@ -3,14 +3,13 @@ CLI 入口 - 提供命令行接口进行数据采集、查询和统计
 """
 import json
 import sys
-from typing import Any
 
 import click
 
 from core import get_logger, settings
-from vectorstore import MilvusStore
 from ingestion.pipeline import Pipeline
 from retrieval.retriever import MultiPathRetriever
+from vectorstore import MilvusStore
 
 logger = get_logger(__name__)
 

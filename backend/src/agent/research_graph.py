@@ -5,9 +5,9 @@ from langgraph.graph import END, StateGraph
 
 from core import get_logger
 
-from .research_state import ResearchState
-from .research_tools import aplanner, aretriever, aanalyst, achecker, awriter
 from .research_memory import assemble_research_memory, build_evidence_trace, build_quality_report
+from .research_state import ResearchState
+from .research_tools import aanalyst, achecker, aplanner, aretriever, awriter
 
 logger = get_logger(__name__)
 
@@ -20,6 +20,7 @@ class TaskCancelledError(Exception):
 async def is_task_cancelled(task_id: str) -> bool:
     """Check if a task has been cancelled via the API (reads DB status)."""
     from sqlalchemy import select
+
     from ..db.database import get_db_session
     from ..db.models import ResearchTask
 

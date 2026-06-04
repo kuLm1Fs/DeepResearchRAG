@@ -20,14 +20,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
-from pathlib import Path
 from typing import Any
 
-from core import GraphStoreError, get_logger, settings
-from vectorstore.embedding import embed_texts_async
-
+from core import get_logger, settings
 from ingestion.chunker import chunk_article
+from vectorstore.embedding import embed_texts_async
 
 from . import normalizer
 from .extractor import EntityRelationExtractor

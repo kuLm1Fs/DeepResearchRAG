@@ -8,10 +8,10 @@ The contract being tested:
   - When build_graph=False, the graph layer is never invoked.
   - When graph_enabled=False (settings), the graph layer is never invoked.
 """
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import sys
 
 # Pre-load the top-level ``graph.builder`` so the indexer's lazy import
 # (``from graph.builder import build_graph_for_articles``) succeeds even

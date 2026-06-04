@@ -3,11 +3,20 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, Date, DateTime, ForeignKey,
-    Index, Integer, String, Text, func, text
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship, DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -46,10 +55,10 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     email: Mapped[str] = mapped_column(String(256), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
-    company_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("companies.id", ondelete="CASCADE"))
+    company_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("companies.id", ondelete="CASCADE"))
     role: Mapped[str] = mapped_column(String(32), default="member")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -62,7 +71,7 @@ class ResearchTask(Base):
     """研究任务表 - 存储深度研究任务的结果和状态"""
     __tablename__ = "research_tasks"
     __table_args__ = (
-        CheckConstraint("status IN ('pending', 'running', 'completed', 'failed')"),
+        CheckConstraint("status IN ('pending', 'running', 'completed', 'failed', 'cancelled', 'dead_letter')"),
         Index("idx_tasks_company", "company_id"),
         Index("idx_tasks_user", "user_id"),
         Index("idx_tasks_status", "status"),
@@ -70,26 +79,32 @@ class ResearchTask(Base):
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    user_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("users.id", ondelete="SET NULL"))
-    company_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("companies.id", ondelete="CASCADE"))
+    user_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("users.id", ondelete="SET NULL"))
+    company_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("companies.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(1024), nullable=False)
-    query: Mapped[Optional[str]] = mapped_column(String(4096))
+    query: Mapped[str | None] = mapped_column(String(4096))
     status: Mapped[str] = mapped_column(String(32), default="pending")
-    current_step: Mapped[Optional[str]] = mapped_column(String(32))
-    result_summary: Mapped[Optional[str]] = mapped_column(Text)
-    result_markdown: Mapped[Optional[str]] = mapped_column(Text)
-    result_slides: Mapped[Optional[dict]] = mapped_column(JSONB)
-    ppt_outline: Mapped[Optional[dict]] = mapped_column(JSONB)
-    evidence_trace: Mapped[Optional[dict]] = mapped_column(JSONB)
-    quality_report: Mapped[Optional[dict]] = mapped_column(JSONB)
-    execution_log: Mapped[Optional[dict]] = mapped_column(JSONB)
-    memory_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB)
+    current_step: Mapped[str | None] = mapped_column(String(32))
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
+    locked_by: Mapped[str | None] = mapped_column(String(128))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime)
+    dead_letter_reason: Mapped[str | None] = mapped_column(Text)
+    result_summary: Mapped[str | None] = mapped_column(Text)
+    result_markdown: Mapped[str | None] = mapped_column(Text)
+    result_slides: Mapped[dict | None] = mapped_column(JSONB)
+    ppt_outline: Mapped[dict | None] = mapped_column(JSONB)
+    evidence_trace: Mapped[dict | None] = mapped_column(JSONB)
+    quality_report: Mapped[dict | None] = mapped_column(JSONB)
+    execution_log: Mapped[dict | None] = mapped_column(JSONB)
+    memory_snapshot: Mapped[dict | None] = mapped_column(JSONB)
     sources_used: Mapped[int] = mapped_column(Integer, default=0)
-    gaps_identified: Mapped[Optional[dict]] = mapped_column(JSONB)
-    conflicts_detected: Mapped[Optional[dict]] = mapped_column(JSONB)
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    gaps_identified: Mapped[dict | None] = mapped_column(JSONB)
+    conflicts_detected: Mapped[dict | None] = mapped_column(JSONB)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -138,14 +153,14 @@ class AuditLog(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[Optional[str]] = mapped_column(String(64))
-    company_id: Mapped[Optional[str]] = mapped_column(String(64))
+    user_id: Mapped[str | None] = mapped_column(String(64))
+    company_id: Mapped[str | None] = mapped_column(String(64))
     action: Mapped[str] = mapped_column(String(64), nullable=False)
-    resource_type: Mapped[Optional[str]] = mapped_column(String(64))
-    resource_id: Mapped[Optional[str]] = mapped_column(String(64))
-    ip_address: Mapped[Optional[str]] = mapped_column(String(48))
-    user_agent: Mapped[Optional[str]] = mapped_column(Text)
-    details: Mapped[Optional[dict]] = mapped_column(JSONB)
+    resource_type: Mapped[str | None] = mapped_column(String(64))
+    resource_id: Mapped[str | None] = mapped_column(String(64))
+    ip_address: Mapped[str | None] = mapped_column(String(48))
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    details: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -161,9 +176,9 @@ class IngestTask(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     status: Mapped[str] = mapped_column(String(32), default="pending")
-    source: Mapped[Optional[str]] = mapped_column(String(64))
+    source: Mapped[str | None] = mapped_column(String(64))
     user_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    company_id: Mapped[Optional[str]] = mapped_column(String(64))
+    company_id: Mapped[str | None] = mapped_column(String(64))
     articles_collected: Mapped[int] = mapped_column(Integer, default=0)
     chunks_indexed: Mapped[int] = mapped_column(Integer, default=0)
     records_inserted: Mapped[int] = mapped_column(Integer, default=0)
@@ -173,9 +188,9 @@ class IngestTask(Base):
     graph_relations: Mapped[int] = mapped_column(Integer, default=0)
     graph_skipped: Mapped[int] = mapped_column(Integer, default=0)
     graph_errors: Mapped[int] = mapped_column(Integer, default=0)
-    error: Mapped[Optional[str]] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Feedback(Base):
@@ -189,11 +204,11 @@ class Feedback(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    query_id: Mapped[Optional[str]] = mapped_column(String(64))
-    query_text: Mapped[Optional[str]] = mapped_column(String(2048))
+    query_id: Mapped[str | None] = mapped_column(String(64))
+    query_text: Mapped[str | None] = mapped_column(String(2048))
     rating: Mapped[str] = mapped_column(String(16), nullable=False)
-    reason: Mapped[Optional[str]] = mapped_column(String(64))
-    comment: Mapped[Optional[str]] = mapped_column(String(1024))
+    reason: Mapped[str | None] = mapped_column(String(64))
+    comment: Mapped[str | None] = mapped_column(String(1024))
     user_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    company_id: Mapped[Optional[str]] = mapped_column(String(64))
+    company_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

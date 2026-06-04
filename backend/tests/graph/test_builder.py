@@ -4,9 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.graph.builder import build_graph_for_articles, _dedupe_entities
-from src.graph.extractor import EntityRelationExtractor
-from src.graph.neo4j_store import Neo4jStore
+from src.graph.builder import _dedupe_entities, build_graph_for_articles
 from src.graph.schema import Entity, Relation
 
 

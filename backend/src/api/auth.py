@@ -4,22 +4,28 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from sqlalchemy import select
 
-from ..auth import hash_password, verify_password, create_access_token, create_refresh_token, decode_access_token
+from ..auth import (
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+)
 from ..core import get_logger, settings, write_audit_log
 from ..core.time import utc_now_naive
 from ..db import get_db_session
-from ..db.models import Company, User, RefreshToken
+from ..db.models import Company, RefreshToken, User
 from .app import limiter
 from .models import (
-    RegisterRequest,
-    RegisterResponse,
     LoginRequest,
     LoginResponse,
     RefreshRequest,
     RefreshResponse,
+    RegisterRequest,
+    RegisterResponse,
     UserResponse,
 )
 
@@ -269,7 +275,7 @@ async def refresh_token(req: RefreshRequest, request: Request, background_tasks:
         # 在 DB 中查找有效 token
         stmt = select(RefreshToken).where(
             RefreshToken.user_id == user_id,
-            RefreshToken.revoked == False,
+            RefreshToken.revoked.is_(False),
         ).order_by(RefreshToken.created_at.desc())
 
         result = await db.execute(stmt)

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """初始化 PostgreSQL 数据库：执行 schema.sql"""
+import os
 import subprocess
 import sys
-import os
 from pathlib import Path
 
 import structlog
+
 logger = structlog.get_logger()
 
 

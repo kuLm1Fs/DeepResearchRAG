@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.graph.extractor import EntityRelationExtractor
-from src.graph.schema import Entity, Relation
 
 
 class FakeLLM:

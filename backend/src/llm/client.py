@@ -1,9 +1,12 @@
+import time
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, Protocol
+from collections.abc import AsyncIterator
+from typing import Any, Protocol
 
 import tenacity
 
 from core import get_logger
+from core.metrics import metrics_registry
 
 logger = get_logger(__name__)
 
@@ -13,7 +16,7 @@ _RETRYABLE_STATUSES = {429, 500, 502, 503}
 
 def _is_retryable(exc: BaseException) -> bool:
     """Check if an exception is retryable (rate limit or server error)."""
-    from openai import APIStatusError, APITimeoutError, APIConnectionError
+    from openai import APIConnectionError, APIStatusError, APITimeoutError
 
     if isinstance(exc, APITimeoutError | APIConnectionError):
         return True
@@ -121,27 +124,66 @@ class OpenAICompatibleLLM(BaseLLM):
     @_retry
     async def chat(self, messages: list[Message], **kwargs) -> str:
         client = self._get_client()
-        response = await client.chat.completions.create(
-            model=self.model,
-            messages=self._format_messages(messages),
-            **kwargs
-        )
-        return response.choices[0].message.content or ""
+        started = time.perf_counter()
+        labels = {"provider": _provider_for_base_url(self._base_url), "model": self.model, "operation": "chat"}
+        try:
+            response = await client.chat.completions.create(
+                model=self.model,
+                messages=self._format_messages(messages),
+                **kwargs
+            )
+            metrics_registry.observe(
+                "rag_llm_latency_seconds",
+                time.perf_counter() - started,
+                labels={**labels, "status": "success"},
+            )
+            _record_usage_metrics(response, labels)
+            return response.choices[0].message.content or ""
+        except Exception as exc:
+            metrics_registry.observe(
+                "rag_llm_latency_seconds",
+                time.perf_counter() - started,
+                labels={**labels, "status": "error"},
+            )
+            metrics_registry.increment(
+                "rag_llm_errors_total",
+                labels={**labels, "error_type": type(exc).__name__},
+            )
+            raise
 
     async def stream_chat(self, messages: list[Message], **kwargs) -> AsyncIterator[str]:
         client = self._get_client()
-        stream = await client.chat.completions.create(
-            model=self.model,
-            messages=self._format_messages(messages),
-            stream=True,
-            **kwargs
-        )
+        started = time.perf_counter()
+        labels = {"provider": _provider_for_base_url(self._base_url), "model": self.model, "operation": "stream_chat"}
         try:
+            stream = await client.chat.completions.create(
+                model=self.model,
+                messages=self._format_messages(messages),
+                stream=True,
+                **kwargs
+            )
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
+            metrics_registry.observe(
+                "rag_llm_latency_seconds",
+                time.perf_counter() - started,
+                labels={**labels, "status": "success"},
+            )
+        except Exception as exc:
+            metrics_registry.observe(
+                "rag_llm_latency_seconds",
+                time.perf_counter() - started,
+                labels={**labels, "status": "error"},
+            )
+            metrics_registry.increment(
+                "rag_llm_errors_total",
+                labels={**labels, "error_type": type(exc).__name__},
+            )
+            raise
         finally:
-            await stream.close()
+            if "stream" in locals():
+                await stream.close()
 
 
 # Backward-compatible aliases
@@ -159,3 +201,24 @@ def create_llm(provider: str, api_key: str, model: str) -> BaseLLM:
         model=model or _PROVIDER_DEFAULT_MODELS[provider],
         base_url=_PROVIDER_BASE_URLS.get(provider),
     )
+
+
+def _provider_for_base_url(base_url: str | None) -> str:
+    for provider, provider_base_url in _PROVIDER_BASE_URLS.items():
+        if provider_base_url == base_url:
+            return provider
+    return "openai"
+
+
+def _record_usage_metrics(response: Any, labels: dict[str, str]) -> None:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+
+    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+    total_tokens = getattr(usage, "total_tokens", 0) or (prompt_tokens + completion_tokens)
+
+    metrics_registry.increment("rag_llm_prompt_tokens_total", prompt_tokens, labels=labels)
+    metrics_registry.increment("rag_llm_completion_tokens_total", completion_tokens, labels=labels)
+    metrics_registry.increment("rag_llm_tokens_total", total_tokens, labels=labels)
