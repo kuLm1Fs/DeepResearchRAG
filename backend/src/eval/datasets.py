@@ -17,6 +17,27 @@ def _as_string_list(value: Any) -> list[str]:
     raise ValueError("expected a string or list of strings")
 
 
+def _as_dict_list(value: Any, field_name: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} must be a list of objects")
+    items: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(f"{field_name} must be a list of objects")
+        items.append(dict(item))
+    return items
+
+
+def _as_dict(value: Any, field_name: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be an object")
+    return dict(value)
+
+
 def _normalise_case(raw: dict[str, Any], case_number: int, source: Path) -> dict[str, Any]:
     query = raw.get("query")
     if not isinstance(query, str) or not query.strip():
@@ -26,7 +47,13 @@ def _normalise_case(raw: dict[str, Any], case_number: int, source: Path) -> dict
         expected_sources = _as_string_list(raw.get("expected_sources"))
         if not expected_sources and raw.get("doc_name"):
             expected_sources = _as_string_list(raw.get("doc_name"))
+        required_sources = _as_string_list(raw.get("required_sources"))
+        if not required_sources:
+            required_sources = list(expected_sources)
         expected_keywords = _as_string_list(raw.get("expected_keywords"))
+        expected_evidence = _as_dict_list(raw.get("expected_evidence"), "expected_evidence")
+        expected_numbers = _as_dict_list(raw.get("expected_numbers"), "expected_numbers")
+        temporal_constraints = _as_dict(raw.get("temporal_constraints"), "temporal_constraints")
     except ValueError as exc:
         raise ValueError(f"{source.name}:{case_number} {exc}") from exc
 
@@ -38,7 +65,12 @@ def _normalise_case(raw: dict[str, Any], case_number: int, source: Path) -> dict
     return {
         "id": str(raw.get("id") or f"case-{case_number:03d}"),
         "query": query.strip(),
+        "query_type": str(raw.get("query_type", "general") or "general"),
         "expected_sources": expected_sources,
+        "required_sources": required_sources,
+        "expected_evidence": expected_evidence,
+        "expected_numbers": expected_numbers,
+        "temporal_constraints": temporal_constraints,
         "expected_keywords": expected_keywords,
         "gold_answer": str(raw.get("gold_answer", "") or ""),
         "difficulty": str(raw.get("difficulty", "unknown") or "unknown"),

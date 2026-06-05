@@ -61,7 +61,9 @@ Milvus 建 IVF_FLAT 向量索引，metric 使用 COSINE；title/content 建标�
 
 ### 检索评估
 
-评估脚本内置 20 条查询，覆盖 Sports、Sci/Tech、Business、World 四类，每类 5 条。指标包括 Precision、Recall、NDCG @ K=1/3/5/10，目标是 MultiPath Precision@5 >= 0.8。
+评估脚本支持两类数据：内置 20 条新闻查询用于 smoke test，金融 golden / badcase 数据集用于真实质量门禁。金融样本统一加载 `query_type`、`expected_sources`、`required_sources`、`expected_evidence`、`expected_numbers` 和 `temporal_constraints`，FinanceBench 的 `doc_name` 会自动映射成 `expected_sources`。
+
+检索层除了 Precision、Recall、NDCG @ K=1/3/5/10，还计算 `Source Recall@5`、`Required Source Coverage@5`、`Evidence Hit@5` 和 `Badcase Fix Rate`，并按 `query_type` 分桶统计。这样能区分“分类相关”与“真正召回了正确金融证据”。
 
 评估结果输出到 `backend/data/eval_results/{timestamp}.json`，用于对比纯语义检索与多路检索。
 
@@ -153,12 +155,12 @@ RSS 摘要经常很短，HN 只有标题和外链，中文站点页面结构差�
 
 - 独立搭建了从 RSS/HN/trafilatura 到 Embedding/Milvus 的资讯数据流水线。
 - 设计了多路召回 + RRF + boost + CrossEncoder re-ranker 的混合检索架构。
-- 建立 Precision@5、Recall、NDCG 的离线评估脚本，目标 Precision@5 >= 0.8。
+- 建立证据级离线评估脚本，覆盖 Precision@5、Source Recall@5、Required Source Coverage@5、Evidence Hit@5、Numeric Accuracy 和 Badcase 回归。
 - 用 LangGraph 实现多阶段 Deep Research Agent，支持缺口补检和最大工具调用限制。
 - 引入证据追踪和任务记忆，使研究过程可恢复、可追溯、可复盘。
 - 前端通过 SSE 实时展示研究过程，并交付 Markdown 报告和 PPT 大纲。
 
 ## 验证记录
 
-- `DEBUG=false uv run pytest tests/test_research_graph_orchestration.py tests/test_evaluate_retrieval.py`：10 passed。
+- `uv run pytest tests/test_eval_datasets.py tests/test_eval_metrics_graphrag.py tests/test_evaluate_retrieval.py tests/test_evaluate_e2e.py -q`：本地 focused eval 测试通过。
 - `npm run build`：通过。

@@ -21,16 +21,34 @@ Edit `configs/.env.prod`:
 | `JWT_SECRET` | Yes | 64-char hex (`python -c "import secrets; print(secrets.token_hex(32))"`) |
 | `DEEPSEEK_API_KEY` | Yes | DeepSeek API key |
 | `VOLCENGINE_API_KEY` | Yes | 火山引擎 Embedding API key |
+| `POSTGRES_PASSWORD` | Yes | PostgreSQL password used by both Compose and backend |
 | `LLM_PROVIDER` | No | `deepseek` / `openai` / `qwen` (default: `deepseek`) |
 | `LLM_MODEL` | No | Model name (default: provider-specific) |
 
 Production automatically disables: `DEBUG`, `LLM_CACHE`, retrieval dumps.
 
+Docker Compose variable interpolation happens before service-level `env_file`
+is applied. To let `${POSTGRES_PASSWORD}` and other Compose variables come
+from `configs/.env.prod`, either pass the env file explicitly:
+
+```bash
+cd docker
+docker compose --env-file ../configs/.env.prod up -d
+```
+
+Or create a local, git-ignored symlink once on the server:
+
+```bash
+ln -sf ../configs/.env.prod docker/.env
+```
+
+After that symlink exists, `cd docker && docker compose up -d` works as well.
+
 ## 2. Start Services
 
 ```bash
 cd docker
-docker compose up -d
+docker compose --env-file ../configs/.env.prod up -d
 ```
 
 This starts 6 services: etcd, MinIO, Milvus, PostgreSQL, backend, frontend.

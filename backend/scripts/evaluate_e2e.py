@@ -29,7 +29,7 @@ from core import configure_logging, get_logger
 from core.config import settings
 from eval.generator import generate_answer_only
 from eval.judge import EvalJudge
-from eval.metrics import check_keyword_hits, compute_citation_coverage
+from eval.metrics import check_keyword_hits, compute_citation_coverage, numeric_accuracy
 from retrieval import MultiPathRetriever
 from vectorstore import MilvusStore
 
@@ -42,6 +42,7 @@ TARGETS = {
     "faithfulness": 3.5,
     "relevance": 3.5,
     "citation_coverage": 0.6,
+    "numeric_accuracy": 0.9,
 }
 
 
@@ -67,6 +68,13 @@ def group_by_difficulty(results: list[dict]) -> dict[str, list[dict]]:
     groups: dict[str, list[dict]] = defaultdict(list)
     for r in results:
         groups[r.get("difficulty", "unknown")].append(r)
+    return groups
+
+
+def group_by_query_type(results: list[dict]) -> dict[str, list[dict]]:
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for r in results:
+        groups[r.get("query_type", "general")].append(r)
     return groups
 
 
@@ -104,6 +112,7 @@ async def evaluate_single(
     result: dict[str, Any] = {
         "query_id": query_item.get("id", ""),
         "query": query,
+        "query_type": query_item.get("query_type", "general"),
         "language": query_item.get("language", "en"),
         "difficulty": difficulty,
     }
@@ -135,6 +144,11 @@ async def evaluate_single(
     generation_ms = (time.perf_counter() - t1) * 1000
 
     result["answer_text"] = answer[:500]  # truncate for JSON size
+    expected_numbers = query_item.get("expected_numbers", [])
+    if expected_numbers:
+        result["answer"] = {
+            "numeric_accuracy": numeric_accuracy(answer, expected_numbers),
+        }
     result["generation"] = {"latency_ms": round(generation_ms)}
 
     # ── 3. Citation coverage ────────────────────────────────────────
@@ -200,6 +214,11 @@ async def run_evaluation(
     corr_scores = [r["judge"]["correctness"]["score"] for r in valid if "judge" in r and "correctness" in r.get("judge", {})]
     kw_rates = [r["retrieval"]["keyword_hit_rate"] for r in valid if "retrieval" in r]
     cov_rates = [r["citations"]["coverage_rate"] for r in valid if "citations" in r]
+    numeric_scores = [
+        r["answer"]["numeric_accuracy"]
+        for r in valid
+        if "answer" in r and "numeric_accuracy" in r["answer"]
+    ]
     latencies = [r["total_latency_ms"] for r in valid if "total_latency_ms" in r]
 
     avg_faith = avg(faith_scores)
@@ -207,12 +226,14 @@ async def run_evaluation(
     avg_corr = avg(corr_scores) if corr_scores else None
     avg_kw = avg(kw_rates)
     avg_cov = avg(cov_rates)
+    avg_numeric = avg(numeric_scores) if numeric_scores else None
 
     passed = (
         avg_kw >= TARGETS["keyword_hit_rate"]
         and avg_faith >= TARGETS["faithfulness"]
         and avg_rel >= TARGETS["relevance"]
         and avg_cov >= TARGETS["citation_coverage"]
+        and (avg_numeric is None or avg_numeric >= TARGETS["numeric_accuracy"])
     )
 
     answer_section: dict[str, Any] = {
@@ -232,6 +253,20 @@ async def run_evaluation(
         answer_section["correctness_by_difficulty"] = {
             d: round(avg([r["judge"]["correctness"]["score"] for r in items if "judge" in r and "correctness" in r.get("judge", {})]), 2)
             for d, items in group_by_difficulty(valid).items()
+        }
+    if avg_numeric is not None:
+        answer_section["avg_numeric_accuracy"] = round(avg_numeric, 3)
+        answer_section["numeric_accuracy_by_query_type"] = {
+            query_type: round(
+                avg([
+                    r["answer"]["numeric_accuracy"]
+                    for r in items
+                    if "answer" in r and "numeric_accuracy" in r["answer"]
+                ]),
+                3,
+            )
+            for query_type, items in group_by_query_type(valid).items()
+            if any("answer" in r and "numeric_accuracy" in r["answer"] for r in items)
         }
 
     summary = {
@@ -299,6 +334,10 @@ def print_report(results: dict[str, Any]) -> None:
     print(f"    Relevance:         {a['avg_relevance']:.2f}  (target {t['relevance']})  [{_status(a['avg_relevance'], t['relevance'])}]")
     for diff, val in sorted(a.get("relevance_by_difficulty", {}).items()):
         print(f"      {diff}: {val:.2f}")
+    if "avg_numeric_accuracy" in a:
+        print(f"    Numeric accuracy:  {a['avg_numeric_accuracy']:.3f}  (target {t['numeric_accuracy']})  [{_status(a['avg_numeric_accuracy'], t['numeric_accuracy'])}]")
+        for query_type, val in sorted(a.get("numeric_accuracy_by_query_type", {}).items()):
+            print(f"      {query_type}: {val:.3f}")
 
     print("\n  Citations")
     c = s["citations"]

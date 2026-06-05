@@ -115,7 +115,7 @@ Research Question
 
 ```bash
 cd docker
-docker compose up -d
+docker compose --env-file ../configs/.env.prod up -d
 ```
 
 Starts Milvus, etcd, MinIO, and PostgreSQL.
@@ -179,7 +179,7 @@ Full Docker deployment guide: [docs/deployment.md](docs/deployment.md).
 
 ```bash
 cd docker
-docker compose up -d --build
+docker compose --env-file ../configs/.env.prod up -d --build
 docker compose logs -f backend
 ```
 

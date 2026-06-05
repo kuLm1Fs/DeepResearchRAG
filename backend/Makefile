@@ -25,12 +25,12 @@ format:
 
 ## Docker: 构建所有镜像
 docker-build:
-	docker compose -f ../docker/docker-compose.yml build
+	docker compose --env-file ../configs/.env.prod -f ../docker/docker-compose.yml build
 
 ## Docker: 启动全栈（基础设施 + 应用）
 docker-up:
-	docker compose -f ../docker/docker-compose.yml up -d
+	docker compose --env-file ../configs/.env.prod -f ../docker/docker-compose.yml up -d
 
 ## Docker: 停止全栈
 docker-down:
-	docker compose -f ../docker/docker-compose.yml down
+	docker compose --env-file ../configs/.env.prod -f ../docker/docker-compose.yml down

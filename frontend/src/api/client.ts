@@ -51,6 +51,10 @@ function clearAuthAndRedirect() {
   window.location.href = '/login'
 }
 
+function shouldAttemptTokenRefresh(url: string): boolean {
+  return !url.startsWith(`${API_BASE}/auth/`)
+}
+
 /**
  * Auth-aware fetch: injects Authorization header and handles 401 with token refresh.
  * Returns the raw Response — caller decides how to parse it.
@@ -67,7 +71,7 @@ async function fetchWithAuth(url: string, options?: RequestInit): Promise<Respon
 
   let response = await doFetch()
 
-  if (response.status === 401) {
+  if (response.status === 401 && shouldAttemptTokenRefresh(url)) {
     if (isRefreshing) {
       await new Promise<void>(resolve => refreshQueue.push(resolve))
       response = await doFetch()

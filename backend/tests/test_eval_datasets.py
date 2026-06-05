@@ -13,7 +13,20 @@ def test_load_eval_cases_accepts_versioned_json_dataset(tmp_path):
             {
                 "id": "fb-001",
                 "query": "What was Apple's revenue?",
+                "query_type": "numeric_fact",
                 "expected_sources": ["AAPL_2023_10K"],
+                "required_sources": ["AAPL_2023_10K"],
+                "expected_evidence": [
+                    {
+                        "source_id": "AAPL_2023_10K",
+                        "must_contain": ["Net sales", "2023", "383,285"],
+                        "section": "consolidated statements",
+                    }
+                ],
+                "expected_numbers": [
+                    {"value": 383.3, "unit": "billion USD", "period": "fiscal 2023"}
+                ],
+                "temporal_constraints": {"fiscal_year": "2023"},
                 "gold_answer": "$383.3 billion",
                 "difficulty": "easy",
                 "category": "revenue",
@@ -29,7 +42,20 @@ def test_load_eval_cases_accepts_versioned_json_dataset(tmp_path):
         {
             "id": "fb-001",
             "query": "What was Apple's revenue?",
+            "query_type": "numeric_fact",
             "expected_sources": ["AAPL_2023_10K"],
+            "required_sources": ["AAPL_2023_10K"],
+            "expected_evidence": [
+                {
+                    "source_id": "AAPL_2023_10K",
+                    "must_contain": ["Net sales", "2023", "383,285"],
+                    "section": "consolidated statements",
+                }
+            ],
+            "expected_numbers": [
+                {"value": 383.3, "unit": "billion USD", "period": "fiscal 2023"}
+            ],
+            "temporal_constraints": {"fiscal_year": "2023"},
             "expected_keywords": [],
             "gold_answer": "$383.3 billion",
             "difficulty": "easy",
@@ -39,6 +65,20 @@ def test_load_eval_cases_accepts_versioned_json_dataset(tmp_path):
             "expected_behavior": "",
         }
     ]
+
+
+def test_load_eval_cases_defaults_finance_extensions(tmp_path):
+    dataset = [{"query": "What was Apple's revenue?"}]
+    path = tmp_path / "minimal.json"
+    path.write_text(json.dumps(dataset), encoding="utf-8")
+
+    cases = load_eval_cases(path)
+
+    assert cases[0]["query_type"] == "general"
+    assert cases[0]["required_sources"] == []
+    assert cases[0]["expected_evidence"] == []
+    assert cases[0]["expected_numbers"] == []
+    assert cases[0]["temporal_constraints"] == {}
 
 
 def test_load_eval_cases_uses_doc_name_as_expected_source_for_financebench(tmp_path):

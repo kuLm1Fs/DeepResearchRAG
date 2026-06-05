@@ -128,7 +128,7 @@ Deep Research 流程：
 
 ```bash
 cd docker
-docker compose up -d
+docker compose --env-file ../configs/.env.prod up -d
 ```
 
 启动 Milvus、etcd、MinIO 和 PostgreSQL。
@@ -193,7 +193,7 @@ npm run dev
 ```bash
 # 构建并启动所有服务
 cd docker
-docker compose up -d --build
+docker compose --env-file ../configs/.env.prod up -d --build
 
 # 查看日志
 docker compose logs -f backend
