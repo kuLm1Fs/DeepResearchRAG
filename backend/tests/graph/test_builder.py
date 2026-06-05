@@ -39,6 +39,7 @@ def _mock_store():
     store._get_driver = AsyncMock()
     store.init_indexes = AsyncMock()
     store.upsert_document = AsyncMock()
+    store.upsert_chunks = AsyncMock(return_value=1)
     store.upsert_entities = AsyncMock(return_value=2)
     store.upsert_relations = AsyncMock(return_value=1)
     store.link_entity_to_chunk = AsyncMock()
@@ -139,7 +140,7 @@ class TestBuildGraphForArticles:
 
         # Mock the embedding call and use a fresh ledger
         with patch.object(builder_mod, "_LEDGER_PATH", fresh_ledger), \
-             patch("src.graph.builder.embed_texts_async", new=AsyncMock(return_value=[[0.1] * 1024, [0.2] * 1024])):
+             patch("src.graph.builder.embed_texts_async", new=AsyncMock(return_value=[[0.1] * 1024, [0.2] * 1024])) as mock_embed:
             stats = await build_graph_for_articles(
                 articles=[_article()],
                 store=store,
@@ -154,8 +155,10 @@ class TestBuildGraphForArticles:
         assert stats["relations_upserted"] == 1
         # Store methods were called (init_indexes/close are only called when
         # the builder owns the store; when caller passes one in, we trust them)
+        store.upsert_chunks.assert_awaited_once()
         store.upsert_entities.assert_awaited_once()
         store.upsert_relations.assert_awaited_once()
+        assert mock_embed.await_args.kwargs["batch_size"] <= 16
 
     @pytest.mark.asyncio
     async def test_skips_already_processed(self, tmp_path):

@@ -1,9 +1,11 @@
-"""Evaluation metrics: keyword hit rate and citation coverage."""
+"""Evaluation metrics for retrieval, finance evidence, and answer quality."""
 
 from __future__ import annotations
 
 import statistics
+import re
 from collections.abc import Iterable
+from typing import Any
 
 
 def check_keyword_hits(results: list[dict], expected_keywords: list[str]) -> float:
@@ -54,6 +56,154 @@ def compute_citation_coverage(citations: list[dict]) -> dict:
         "unsupported": unsupported,
         "coverage_rate": (supported + partial * 0.5) / total,
     }
+
+
+# ---------------------------------------------------------------------------
+# Finance evidence metrics
+# ---------------------------------------------------------------------------
+
+SOURCE_FIELDS = (
+    "source_id",
+    "doc_id",
+    "document_id",
+    "doc_name",
+    "source",
+    "url",
+    "title",
+    "file_name",
+)
+
+
+def normalise_match_text(value: Any) -> str:
+    """Normalize text for loose source/evidence matching."""
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def result_source_candidates(result: dict[str, Any]) -> list[str]:
+    """Extract normalized source identifiers from common result fields."""
+    candidates = []
+    for field in SOURCE_FIELDS:
+        value = result.get(field)
+        if value:
+            candidates.append(normalise_match_text(value))
+    return [candidate for candidate in candidates if candidate]
+
+
+def _matches_source(result: dict[str, Any], expected_source: str) -> bool:
+    expected = normalise_match_text(expected_source)
+    if not expected:
+        return False
+    return any(
+        expected in candidate or candidate in expected
+        for candidate in result_source_candidates(result)
+    )
+
+
+def _matches_chunk_id(result: dict[str, Any], expected_chunk_id: str) -> bool:
+    expected = str(expected_chunk_id or "")
+    if not expected:
+        return True
+    return any(
+        str(result.get(field, "") or "") == expected
+        for field in ("chunk_id", "id", "external_id")
+    )
+
+
+def required_source_coverage_at_k(
+    results: list[dict[str, Any]],
+    required_sources: list[str],
+    k: int,
+) -> float:
+    """Fraction of required source documents present in top-K results."""
+    if not required_sources or k <= 0:
+        return 0.0
+
+    top_results = results[:k]
+    hits = 0
+    for source in required_sources:
+        if any(_matches_source(result, source) for result in top_results):
+            hits += 1
+    return hits / len(required_sources)
+
+
+def _result_text(result: dict[str, Any]) -> str:
+    fields = ("title", "section", "content", "text", "summary")
+    return " ".join(str(result.get(field, "")) for field in fields).lower()
+
+
+def evidence_hit_at_k(
+    results: list[dict[str, Any]],
+    expected_evidence: list[dict[str, Any]],
+    k: int,
+) -> float:
+    """Fraction of expected evidence specs matched by top-K chunks.
+
+    Each evidence spec can include ``source_id``, ``must_contain`` terms, and
+    an optional ``section`` hint. All provided constraints must match one
+    retrieved result for the evidence item to count as hit.
+    """
+    if not expected_evidence or k <= 0:
+        return 0.0
+
+    top_results = results[:k]
+    hits = 0
+    for evidence in expected_evidence:
+        source_id = str(evidence.get("source_id", "") or "")
+        chunk_id = str(evidence.get("chunk_id", "") or "")
+        terms = [str(term).lower() for term in evidence.get("must_contain", []) if str(term)]
+        section = str(evidence.get("section", "") or "").lower()
+
+        for result in top_results:
+            if source_id and not _matches_source(result, source_id):
+                continue
+            text = _result_text(result)
+            if section and section not in text:
+                continue
+            chunk_ok = bool(chunk_id) and _matches_chunk_id(result, chunk_id)
+            terms_ok = bool(terms) and all(term in text for term in terms)
+            if chunk_ok or terms_ok or (not chunk_id and not terms):
+                hits += 1
+                break
+
+    return hits / len(expected_evidence)
+
+
+def _number_patterns(value: Any) -> list[str]:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return []
+
+    patterns = {str(value).lower()}
+    patterns.add(f"{number:g}".lower())
+    patterns.add(f"{number:,.0f}".lower())
+    if number.is_integer():
+        patterns.add(str(int(number)))
+    return [pattern for pattern in patterns if pattern]
+
+
+def numeric_accuracy(answer: str, expected_numbers: list[dict[str, Any]]) -> float:
+    """Score expected financial numbers found in the generated answer.
+
+    A number item is correct when the answer contains the value plus any
+    provided unit and period text. This deterministic metric is intentionally
+    conservative; nuanced equivalence can be handled by LLM correctness.
+    """
+    if not expected_numbers:
+        return 0.0
+
+    answer_text = re.sub(r"\s+", " ", answer.lower())
+    hits = 0
+    for item in expected_numbers:
+        value_ok = any(pattern in answer_text for pattern in _number_patterns(item.get("value")))
+        unit = str(item.get("unit", "") or "").lower()
+        period = str(item.get("period", "") or "").lower()
+        unit_ok = not unit or all(part in answer_text for part in unit.split())
+        period_ok = not period or period in answer_text
+        if value_ok and unit_ok and period_ok:
+            hits += 1
+
+    return hits / len(expected_numbers)
 
 
 # ---------------------------------------------------------------------------

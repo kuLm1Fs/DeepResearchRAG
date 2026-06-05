@@ -24,12 +24,13 @@ from typing import Any
 
 from core import get_logger, settings
 from ingestion.chunker import chunk_article
+from vectorstore.embedding import BATCH_SIZE as EMBEDDING_BATCH_SIZE
 from vectorstore.embedding import embed_texts_async
 
 from . import normalizer
 from .extractor import EntityRelationExtractor
 from .neo4j_store import Neo4jStore
-from .schema import DocumentNode, Entity, Relation
+from .schema import ChunkNode, DocumentNode, Entity, Relation
 
 logger = get_logger(__name__)
 
@@ -130,9 +131,14 @@ async def build_graph_for_articles(
                 },
                 max_chars=3500,
             )
-            parent_doc_id = article.get("content_hash") or article.get("external_id", "")
+            parent_doc_id = (
+                article.get("parent_doc_id")
+                or article.get("content_hash")
+                or article.get("external_id", "")
+            )
+            chunk_base_id = article.get("external_id") or parent_doc_id
             for i, ch in enumerate(chunks):
-                ch_id = f"{parent_doc_id}:{i}"
+                ch_id = f"{chunk_base_id}:{i}"
                 ch["chunk_id"] = ch_id
                 ch["parent_doc_id"] = parent_doc_id
                 all_chunks.append(ch)
@@ -151,6 +157,7 @@ async def build_graph_for_articles(
         all_entities: list[Entity] = []
         all_relations: list[Relation] = []
         docs_to_upsert: dict[str, DocumentNode] = {}
+        chunks_to_upsert: list[ChunkNode] = []
 
         for chunk, (entities, relations) in zip(all_chunks, results):
             chunk_id = chunk["chunk_id"]
@@ -163,6 +170,14 @@ async def build_graph_for_articles(
 
             article = chunk_to_doc[chunk_id]
             parent_doc_id = chunk["parent_doc_id"]
+            chunks_to_upsert.append(
+                ChunkNode(
+                    chunk_id=chunk_id,
+                    content=chunk.get("content", ""),
+                    position=int(chunk.get("chunk_index") or 0),
+                    parent_doc_id=parent_doc_id,
+                )
+            )
             if parent_doc_id and parent_doc_id not in docs_to_upsert:
                 docs_to_upsert[parent_doc_id] = DocumentNode(
                     doc_id=parent_doc_id,
@@ -191,7 +206,7 @@ async def build_graph_for_articles(
         texts_to_embed = [f"{e.name}: {e.description}" for e in unique_entities]
         try:
             embeddings = await embed_texts_async(
-                texts_to_embed, batch_size=settings.graph_extraction_batch_size * 4
+                texts_to_embed, batch_size=EMBEDDING_BATCH_SIZE
             )
         except Exception as e:
             stats["errors"] += 1
@@ -206,15 +221,17 @@ async def build_graph_for_articles(
             for doc in docs_to_upsert.values():
                 await store.upsert_document(doc)
 
-        # 7. Upsert entities
+        # 7. Upsert chunks and link them to their source documents.
+        # Graph retrieval reads Chunk.content and traverses Chunk -> Document.
+        await store.upsert_chunks(chunks_to_upsert)
+
+        # 8. Upsert entities
         stats["entities_upserted"] = await store.upsert_entities(unique_entities)
 
-        # 8. Upsert relations
+        # 9. Upsert relations
         stats["relations_upserted"] = await store.upsert_relations(all_relations)
 
-        # 9. Link entities to their source chunks
-        #    (Chunk nodes are virtual — we don't store their full content in the
-        #    graph, just an ID and the MENTIONED_IN relationship.)
+        # 10. Link entities to their source chunks.
         link_tasks = []
         for chunk, (entities, _) in zip(all_chunks, results):
             for e in entities:
@@ -225,7 +242,7 @@ async def build_graph_for_articles(
         if link_tasks:
             await asyncio.gather(*link_tasks, return_exceptions=True)
 
-        # 10. Persist ledger
+        # 11. Persist ledger
         if save_ledger and skip_existing:
             for a in to_process:
                 h = a.get("content_hash")

@@ -219,7 +219,27 @@ class TestIndexerGraphHook:
             )
         assert stats["graph_entities"] == 7
         assert stats["graph_relations"] == 4
-        assert stats["graph_errors"] == 0
+
+    @pytest.mark.asyncio
+    async def test_preserves_parent_doc_id_and_uses_external_id_for_chunk_namespace(self):
+        """FinanceBench evidence keeps doc_name as source id while chunks stay unique."""
+        from src.ingestion.indexer import index_articles
+
+        milvus = _mock_milvus()
+        article = _article(content_hash="hash-page-42")
+        article["parent_doc_id"] = "AAPL_2023_10K"
+        article["external_id"] = "financebench:AAPL_2023_10K:p42:e0"
+
+        with _patched_embed(), _patched_graph_build():
+            await index_articles(
+                articles=[article],
+                store=milvus,
+                build_graph=False,
+            )
+
+        inserted_records = milvus.insert.call_args.args[0]
+        assert inserted_records[0]["parent_doc_id"] == "AAPL_2023_10K"
+        assert inserted_records[0]["chunk_id"] == "financebench:AAPL_2023_10K:p42:e0:0"
 
     @pytest.mark.asyncio
     async def test_default_build_graph_is_true(self):

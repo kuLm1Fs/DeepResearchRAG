@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,14 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_LIKE_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9&./-]{1,63}|[\u4e00-\u9fff]{2,}")
+_LIKE_STOPWORDS = {
+    "and", "are", "but", "did", "does", "for", "from", "had", "has", "have",
+    "in", "include", "includes", "into", "its", "of", "percent", "the",
+    "their", "this", "total", "was", "were", "what", "when", "where",
+    "which", "with",
+}
+
 
 def escape_milvus_like_value(value: str) -> str:
     """Escape user-controlled content before embedding it in a Milvus LIKE expr."""
@@ -29,9 +38,36 @@ def escape_milvus_like_value(value: str) -> str:
     )
 
 
-def build_like_expr(fields: list[str], query: str) -> str:
-    escaped_query = escape_milvus_like_value(query)
-    return " or ".join(f'{field} like "%{escaped_query}%"' for field in fields)
+def extract_like_terms(query: str, max_terms: int = 8) -> list[str]:
+    """Extract short Milvus LIKE-safe terms instead of querying with a raw sentence."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for match in _LIKE_TOKEN_RE.finditer(query):
+        term = match.group(0).strip(".-/")
+        if match.end() < len(query) and query[match.end()] == "%":
+            continue
+        if len(term) < 2:
+            continue
+        key = term.lower()
+        if key in _LIKE_STOPWORDS or key in seen:
+            continue
+        seen.add(key)
+        terms.append(term)
+        if len(terms) >= max_terms:
+            break
+    return terms
+
+
+def build_like_expr(fields: list[str], query: str) -> str | None:
+    terms = extract_like_terms(query)
+    if not terms:
+        return None
+
+    clauses = []
+    for term in terms:
+        escaped_term = escape_milvus_like_value(term)
+        clauses.extend(f'{field} like "%{escaped_term}%"' for field in fields)
+    return " or ".join(clauses)
 
 
 def escape_milvus_string_value(value: Any) -> str:
@@ -300,8 +336,13 @@ class MultiPathRetriever:
         try:
             started = time.perf_counter()
             self.fault_injector.maybe_raise("milvus")
+            like_expr = build_like_expr(["title", "content"], query)
+            if not like_expr:
+                self._record_path_metrics("keyword", started, 0, "success")
+                return []
+            expr = combine_expr(like_expr, filter_expr)
             results = await self.store.query_async(
-                expr=combine_expr(build_like_expr(["title", "content"], query), filter_expr),
+                expr=expr,
                 output_fields=[
                     "title", "content", "source", "language", "category", "published_at",
                     "content_hash", "id", "user_id", "company_id", "url",
@@ -328,8 +369,13 @@ class MultiPathRetriever:
         try:
             started = time.perf_counter()
             self.fault_injector.maybe_raise("milvus")
+            like_expr = build_like_expr(["title"], query)
+            if not like_expr:
+                self._record_path_metrics("title", started, 0, "success")
+                return []
+            expr = combine_expr(like_expr, filter_expr)
             results = await self.store.query_async(
-                expr=combine_expr(build_like_expr(["title"], query), filter_expr),
+                expr=expr,
                 output_fields=[
                     "title", "content", "source", "language", "category", "published_at",
                     "content_hash", "id", "user_id", "company_id", "url",

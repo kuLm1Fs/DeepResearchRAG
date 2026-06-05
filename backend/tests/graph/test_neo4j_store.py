@@ -5,6 +5,7 @@ import pytest
 
 from src.graph.neo4j_store import Neo4jStore
 from src.graph.schema import (
+    ChunkNode,
     Entity,
     Relation,
 )
@@ -131,6 +132,38 @@ class TestUpsert:
                 count = await store.upsert_entities([])
         assert count == 0
         session.execute_write.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_upsert_chunks_calls_cypher_with_chunk_payload(self):
+        session = _mock_session_with(result_consume=1)
+        with patch("src.graph.neo4j_store.AsyncGraphDatabase") as mock_agdb:
+            mock_agdb.driver = MagicMock(return_value=_mock_driver(session))
+            with patch("src.graph.neo4j_store.settings") as s:
+                s.neo4j_password = "secret"
+                s.neo4j_uri = "bolt://x"
+                s.neo4j_user = "u"
+                s.neo4j_database = "d"
+                store = Neo4jStore()
+                count = await store.upsert_chunks([
+                    ChunkNode(
+                        chunk_id="doc-1:0",
+                        content="Apple reported net sales.",
+                        position=0,
+                        parent_doc_id="doc-1",
+                    )
+                ])
+
+        assert count == 1
+        session.execute_write.assert_awaited_once()
+        params = session.execute_write.await_args.args[1]
+        assert params == [
+            {
+                "chunk_id": "doc-1:0",
+                "content": "Apple reported net sales.",
+                "position": 0,
+                "parent_doc_id": "doc-1",
+            }
+        ]
 
 
 class TestHealthCheck:

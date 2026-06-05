@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import urllib.request
 from pathlib import Path
@@ -33,6 +34,27 @@ DIFFICULTY_MAP = {
     "domain-relevant": "medium",
     "novel-generated": "hard",
 }
+
+QUERY_TYPE_MAP = {
+    "metrics-generated": "single_source_fact",
+    "domain-relevant": "single_source_fact",
+    "novel-generated": "analysis",
+}
+
+FINANCE_EVIDENCE_PHRASES = [
+    "net sales",
+    "total revenue",
+    "revenue",
+    "operating income",
+    "net income",
+    "gross margin",
+    "cash flow",
+    "capital expenditures",
+    "assets",
+    "liabilities",
+    "debt",
+    "equity",
+]
 
 
 def download_jsonl(url: str) -> list[dict[str, Any]]:
@@ -64,6 +86,61 @@ def extract_keywords(question: str, company: str, doc_name: str) -> list[str]:
     return list(set(keywords))[:8]
 
 
+def extract_evidence_terms(evidence_text: str, max_terms: int = 3) -> list[str]:
+    """Extract stable evidence anchors for deterministic chunk-level matching."""
+    text = re.sub(r"\s+", " ", evidence_text.strip())
+    text_lower = text.lower()
+    terms: list[str] = []
+
+    for number in re.findall(r"\$?\d[\d,]*(?:\.\d+)?%?", text):
+        cleaned = number.lstrip("$").strip(".,;:)")
+        if re.fullmatch(r"(?:19|20)\d{2}", cleaned):
+            continue
+        if re.fullmatch(r"\d", cleaned):
+            continue
+        if cleaned and cleaned not in terms:
+            terms.append(cleaned)
+            break
+
+    for year in re.findall(r"\b(?:19|20)\d{2}\b", text):
+        if year not in terms:
+            terms.append(year)
+            break
+
+    for phrase in FINANCE_EVIDENCE_PHRASES:
+        if phrase in text_lower and phrase not in terms:
+            terms.append(phrase)
+        if len(terms) >= max_terms:
+            return terms
+
+    for token in re.findall(r"[A-Za-z][A-Za-z-]{3,}", text):
+        token_lower = token.lower()
+        if token_lower not in terms:
+            terms.append(token_lower)
+        if len(terms) >= max_terms:
+            return terms
+
+    return terms
+
+
+def build_expected_evidence(doc_name: str, evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    expected = []
+    for evidence_index, ev in enumerate(evidence):
+        evidence_text = ev.get("evidence_text", "")
+        if not evidence_text:
+            continue
+        page_num = ev.get("evidence_page_num")
+        item: dict[str, Any] = {
+            "source_id": doc_name,
+            "must_contain": extract_evidence_terms(evidence_text),
+        }
+        if page_num is not None:
+            item["chunk_id"] = f"financebench:{doc_name}:p{page_num}:e{evidence_index}:0"
+            item["page"] = page_num
+        expected.append(item)
+    return expected
+
+
 def build_eval_queries(
     questions: list[dict[str, Any]],
     meta: list[dict[str, Any]],
@@ -78,13 +155,20 @@ def build_eval_queries(
         doc_meta = meta_by_doc.get(doc_name, {})
         doc_type = doc_meta.get("doc_type", "unknown")
 
-        evidence_texts = [ev.get("evidence_text", "") for ev in q.get("evidence", []) if ev.get("evidence_text")]
+        evidence = q.get("evidence", [])
+        evidence_texts = [ev.get("evidence_text", "") for ev in evidence if ev.get("evidence_text")]
+        expected_evidence = build_expected_evidence(doc_name, evidence)
+        query_type = QUERY_TYPE_MAP.get(q.get("question_type", ""), "single_source_fact")
 
         queries.append({
             "id": f"fb-{i + 1:03d}",
             "query": q["question"],
+            "query_type": query_type,
             "language": "en",
             "expected_keywords": extract_keywords(q["question"], company, doc_name),
+            "expected_sources": [doc_name],
+            "required_sources": [doc_name],
+            "expected_evidence": expected_evidence,
             "gold_answer": q.get("answer", ""),
             "evidence_texts": evidence_texts,
             "doc_name": doc_name,
@@ -114,7 +198,7 @@ def main() -> int:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     dataset = {
-        "version": 2,
+        "version": 3,
         "domain": "finance",
         "source": "FinanceBench",
         "description": "SEC filings QA benchmark (10-K, 10-Q, 8-K, earnings reports)",

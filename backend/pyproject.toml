@@ -57,6 +57,9 @@ dependencies = [
 
     # GraphRAG — Neo4j 5.15+ for built-in vector index (no plugin needed)
     "neo4j>=5.15.0",
+
+    # Optional cross-encoder reranker used after RRF fusion
+    "sentence-transformers>=3.0.0",
 ]
 
 [project.optional-dependencies]

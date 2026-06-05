@@ -153,6 +153,22 @@ MATCH (d:Document {doc_id: $doc_id})
 MERGE (c)-[:PART_OF]->(d)
 """.strip()
 
+UPSERT_CHUNK = """
+MERGE (c:Chunk {chunk_id: $chunk_id})
+ON CREATE SET
+  c.content = $content,
+  c.position = $position,
+  c.parent_doc_id = $parent_doc_id
+ON MATCH SET
+  c.content = $content,
+  c.position = $position,
+  c.parent_doc_id = $parent_doc_id
+WITH c
+MATCH (d:Document {doc_id: $parent_doc_id})
+MERGE (c)-[:PART_OF]->(d)
+RETURN c.chunk_id AS chunk_id
+""".strip()
+
 # Read queries used by GraphRetriever (Phase 3)
 VECTOR_SEARCH_ENTITIES = """
 CALL db.index.vector.queryNodes('entity_embedding', $top_k, $embedding)

@@ -18,7 +18,12 @@ from src.api import auth as auth_api
 from src.api import routes as api_routes
 from src.core import config as core_config
 from src.llm.cache import CachedLLM
-from src.retrieval.retriever import MultiPathRetriever, build_like_expr, escape_milvus_like_value
+from src.retrieval.retriever import (
+    MultiPathRetriever,
+    build_like_expr,
+    escape_milvus_like_value,
+    extract_like_terms,
+)
 from src.vectorstore import embedding
 
 
@@ -99,10 +104,44 @@ class MilvusExpressionHardeningTests(unittest.TestCase):
 
         self.assertEqual(escaped, 'AI \\"agent\\" \\\\ 100\\%\\_news')
 
-    def test_build_like_expr_uses_escaped_value_for_each_field(self):
-        expr = build_like_expr(["title", "content"], 'AI "agent"')
+    def test_extract_like_terms_uses_safe_tokens_from_finance_questions(self):
+        terms = extract_like_terms(
+            'What was the percent of the total unrecognized tax benefits in 3M\'s 2022 10-K? '
+            'Does it include a 100% adjustment?'
+        )
 
-        self.assertEqual(expr, 'title like "%AI \\"agent\\"%" or content like "%AI \\"agent\\"%"')
+        self.assertIn("3M", terms)
+        self.assertIn("2022", terms)
+        self.assertIn("10-K", terms)
+        self.assertNotIn("100%", terms)
+        self.assertNotIn("the", terms)
+
+    def test_build_like_expr_uses_safe_terms_instead_of_raw_question(self):
+        expr = build_like_expr(["title", "content"], '3M 2022 10-K had a 100% "tax" issue')
+
+        self.assertEqual(
+            expr,
+            'title like "%3M%" or content like "%3M%" or '
+            'title like "%2022%" or content like "%2022%" or '
+            'title like "%10-K%" or content like "%10-K%" or '
+            'title like "%tax%" or content like "%tax%" or '
+            'title like "%issue%" or content like "%issue%"',
+        )
+
+    def test_build_like_expr_returns_none_when_query_has_no_safe_terms(self):
+        expr = build_like_expr(["title", "content"], '% _ " \\')
+
+        self.assertIsNone(expr)
+
+
+class DependencyDeclarationTests(unittest.TestCase):
+    def test_reranker_dependency_is_declared(self):
+        import tomllib
+
+        pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+        data = tomllib.loads(pyproject.read_text())
+
+        self.assertIn("sentence-transformers>=3.0.0", data["project"]["dependencies"])
 
 
 class RetrieverFilterPushdownTests(unittest.IsolatedAsyncioTestCase):
@@ -146,6 +185,28 @@ class RetrieverFilterPushdownTests(unittest.IsolatedAsyncioTestCase):
                 '(title like "%AI%") and company_id == "comp_123" and user_id == "user_456" and language == "zh"',
             ],
         )
+
+    async def test_retriever_does_not_query_milvus_like_path_without_safe_terms(self):
+        class FakeStore:
+            def __init__(self):
+                self.query_exprs = []
+
+            def query(self, expr, output_fields=None, limit=100):
+                self.query_exprs.append(expr)
+                return []
+
+            async def query_async(self, **kwargs):
+                return self.query(**kwargs)
+
+        fake_store = FakeStore()
+        retriever = MultiPathRetriever(fake_store, rerank_enabled=False)
+
+        keyword = await retriever._keyword_search("% _ \\", filter_expr='company_id == "comp_123"')
+        title = await retriever._title_match("% _ \\", filter_expr='company_id == "comp_123"')
+
+        self.assertEqual(keyword, [])
+        self.assertEqual(title, [])
+        self.assertEqual(fake_store.query_exprs, [])
 
 
 class EmbeddingFailureHardeningTests(unittest.IsolatedAsyncioTestCase):

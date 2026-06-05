@@ -1,9 +1,12 @@
 """Tests for the Phase 6 graph metrics added to ``src.eval.metrics``."""
 from src.eval.metrics import (
     aggregate_graphrag_metrics,
+    evidence_hit_at_k,
     entity_recall,
     graph_path_hit_rate,
     latency_summary,
+    numeric_accuracy,
+    required_source_coverage_at_k,
 )
 
 
@@ -110,3 +113,97 @@ class TestAggregateGraphragMetrics:
         assert m["latency"]["n"] == 2
         assert m["latency"]["p50"] == 150.0
         assert m["results_per_query_mean"] == 1.0
+
+
+class TestFinanceEvidenceMetrics:
+    def test_required_source_coverage_counts_all_required_sources(self):
+        results = [
+            {"doc_name": "AAPL_2023_10K", "content": "Apple revenue"},
+            {"source_id": "MSFT_2023_10K", "content": "Microsoft revenue"},
+        ]
+
+        assert required_source_coverage_at_k(
+            results,
+            ["AAPL_2023_10K", "MSFT_2023_10K"],
+            2,
+        ) == 1.0
+        assert required_source_coverage_at_k(
+            results,
+            ["AAPL_2023_10K", "MSFT_2023_10K"],
+            1,
+        ) == 0.5
+
+    def test_evidence_hit_requires_source_and_must_contain_terms(self):
+        results = [
+            {
+                "doc_name": "AAPL_2023_10K",
+                "section": "consolidated statements",
+                "content": "Net sales were $383,285 million in 2023.",
+            },
+            {
+                "doc_name": "MSFT_2023_10K",
+                "content": "Total revenue was $211,915 million.",
+            },
+        ]
+        expected = [
+            {
+                "source_id": "AAPL_2023_10K",
+                "must_contain": ["Net sales", "2023", "383,285"],
+                "section": "consolidated statements",
+            },
+            {
+                "source_id": "MSFT_2023_10K",
+                "must_contain": ["Total revenue", "211,915"],
+            },
+        ]
+
+        assert evidence_hit_at_k(results, expected, 2) == 1.0
+        assert evidence_hit_at_k(results, expected, 1) == 0.5
+
+    def test_evidence_hit_accepts_chunk_id_as_precise_fallback(self):
+        results = [
+            {
+                "chunk_id": "financebench:AAPL_2023_10K:p42:e0:0",
+                "doc_name": "AAPL_2023_10K",
+                "content": "Net sales were $383,285 million in 2023.",
+            }
+        ]
+        expected = [
+            {
+                "source_id": "AAPL_2023_10K",
+                "chunk_id": "financebench:AAPL_2023_10K:p42:e0:0",
+            }
+        ]
+
+        assert evidence_hit_at_k(results, expected, 1) == 1.0
+
+        expected[0]["chunk_id"] = "financebench:AAPL_2023_10K:p99:e0:0"
+
+        assert evidence_hit_at_k(results, expected, 1) == 0.0
+
+    def test_evidence_hit_does_not_require_chunk_id_when_text_anchors_match(self):
+        results = [
+            {
+                "chunk_id": "financebench:AAPL_2023_10K:p42:e0:1",
+                "doc_name": "AAPL_2023_10K",
+                "content": "Net sales were $383,285 million in 2023.",
+            }
+        ]
+        expected = [
+            {
+                "source_id": "AAPL_2023_10K",
+                "chunk_id": "financebench:AAPL_2023_10K:p42:e0:0",
+                "must_contain": ["Net sales", "383,285"],
+            }
+        ]
+
+        assert evidence_hit_at_k(results, expected, 1) == 1.0
+
+    def test_numeric_accuracy_checks_value_unit_and_period(self):
+        answer = "Apple fiscal 2023 revenue was $383.3 billion USD."
+        expected_numbers = [
+            {"value": 383.3, "unit": "billion USD", "period": "fiscal 2023"},
+            {"value": 211.9, "unit": "billion USD", "period": "fiscal 2023"},
+        ]
+
+        assert numeric_accuracy(answer, expected_numbers) == 0.5

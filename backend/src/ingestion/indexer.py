@@ -32,7 +32,8 @@ async def index_articles(
     chunks: list[dict[str, Any]] = []
 
     for article in articles:
-        parent_doc_id = article.get("content_hash") or str(uuid.uuid4())
+        parent_doc_id = article.get("parent_doc_id") or article.get("content_hash") or str(uuid.uuid4())
+        chunk_base_id = article.get("external_id") or parent_doc_id
         article_chunks = chunk_article(
             {
                 "title": article.get("title", ""),
@@ -54,7 +55,7 @@ async def index_articles(
                     "author": article.get("author") or article.get("hn_author", ""),
                     "external_id": article.get("external_id", ""),
                     "fetched_at": int(time.time()),
-                    "chunk_id": f"{parent_doc_id}:{chunk_index}",
+                    "chunk_id": f"{chunk_base_id}:{chunk_index}",
                     "parent_doc_id": parent_doc_id,
                     "user_id": user_id,
                     "company_id": company_id,

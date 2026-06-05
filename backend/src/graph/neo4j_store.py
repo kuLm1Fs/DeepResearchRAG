@@ -144,6 +144,8 @@ class Neo4jStore:
             {
                 "source_id": _resolve_entity_id(r.source, "Concept"),
                 "target_id": _resolve_entity_id(r.target, "Concept"),
+                "source_name": r.source,
+                "target_name": r.target,
                 "type": r.type,
                 "description": r.description,
                 "keywords": r.keywords,
@@ -155,6 +157,24 @@ class Neo4jStore:
         driver = await self._get_driver()
         async with driver.session(database=self._database) as session:
             count = await session.execute_write(_upsert_relations_tx, params)
+        return count
+
+    @_retry
+    async def upsert_chunks(self, chunks: list[graph_schema.ChunkNode]) -> int:
+        if not chunks:
+            return 0
+        driver = await self._get_driver()
+        params = [
+            {
+                "chunk_id": chunk.chunk_id,
+                "content": chunk.content,
+                "position": chunk.position,
+                "parent_doc_id": chunk.parent_doc_id,
+            }
+            for chunk in chunks
+        ]
+        async with driver.session(database=self._database) as session:
+            count = await session.execute_write(_upsert_chunks_tx, params)
         return count
 
     @_retry
@@ -319,40 +339,68 @@ def _merge_relations(relations: Iterable[graph_schema.Relation]) -> list[graph_s
     return list(by_key.values())
 
 
-# Transaction functions (sync functions called by execute_write/execute_read)
-def _init_indexes_tx(tx: Any, dim: int) -> None:
-    tx.run(graph_schema.CREATE_VECTOR_INDEX_ENTITY, dim=dim)
-    tx.run(graph_schema.CREATE_FULLTEXT_INDEX_ENTITY)
-    tx.run(graph_schema.CREATE_FULLTEXT_INDEX_RELATION)
-    tx.run(graph_schema.CREATE_INDEX_ENTITY_NAME)
+# Transaction functions (async functions called by execute_write/execute_read)
+async def _init_indexes_tx(tx: Any, dim: int) -> None:
+    await tx.run(graph_schema.CREATE_VECTOR_INDEX_ENTITY, dim=dim)
+    await tx.run(graph_schema.CREATE_FULLTEXT_INDEX_ENTITY)
+    await tx.run(graph_schema.CREATE_FULLTEXT_INDEX_RELATION)
+    await tx.run(graph_schema.CREATE_INDEX_ENTITY_NAME)
 
 
-def _upsert_entities_tx(tx: Any, params: list[dict]) -> int:
-    result = tx.run(
-        "UNWIND $batch AS row " + graph_schema.UPSERT_ENTITY,
-        batch=params,
-    )
-    return result.consume().counters.nodes_created
+async def _upsert_entities_tx(tx: Any, params: list[dict]) -> int:
+    created = 0
+    for row in params:
+        result = await tx.run(graph_schema.UPSERT_ENTITY, **row)
+        summary = await result.consume()
+        created += summary.counters.nodes_created
+    return created
 
 
-def _upsert_relations_tx(tx: Any, params: list[dict]) -> int:
-    result = tx.run(
-        "UNWIND $batch AS row " + graph_schema.UPSERT_RELATION,
-        batch=params,
-    )
-    return result.consume().counters.relationships_created
+async def _upsert_relations_tx(tx: Any, params: list[dict]) -> int:
+    created = 0
+    for row in params:
+        result = await tx.run(
+            """
+            MATCH (s:Entity {name: $source_name})
+            MATCH (t:Entity {name: $target_name})
+            MERGE (s)-[r:RELATION {type: $type, source: s.entity_id, target: t.entity_id}]->(t)
+            ON CREATE SET
+              r.description = $description,
+              r.keywords = $keywords,
+              r.weight = $weight,
+              r.source_chunk_ids = $source_chunk_ids
+            ON MATCH SET
+              r.description = $description,
+              r.keywords = $keywords,
+              r.weight = CASE WHEN $weight > r.weight THEN $weight ELSE r.weight END,
+              r.source_chunk_ids = $source_chunk_ids
+            """,
+            **row,
+        )
+        summary = await result.consume()
+        created += summary.counters.relationships_created
+    return created
 
 
-def _link_entity_chunk_tx(tx: Any, params: dict) -> None:
-    tx.run(graph_schema.LINK_ENTITY_TO_CHUNK, **params)
+async def _upsert_chunks_tx(tx: Any, params: list[dict]) -> int:
+    created = 0
+    for row in params:
+        result = await tx.run(graph_schema.UPSERT_CHUNK, **row)
+        summary = await result.consume()
+        created += summary.counters.nodes_created
+    return created
 
 
-def _link_chunk_doc_tx(tx: Any, params: dict) -> None:
-    tx.run(graph_schema.LINK_CHUNK_TO_DOC, **params)
+async def _link_entity_chunk_tx(tx: Any, params: dict) -> None:
+    await tx.run(graph_schema.LINK_ENTITY_TO_CHUNK, **params)
 
 
-def _upsert_document_tx(tx: Any, params: dict) -> None:
-    tx.run(
+async def _link_chunk_doc_tx(tx: Any, params: dict) -> None:
+    await tx.run(graph_schema.LINK_CHUNK_TO_DOC, **params)
+
+
+async def _upsert_document_tx(tx: Any, params: dict) -> None:
+    await tx.run(
         """
         MERGE (d:Document {doc_id: $doc_id})
         ON CREATE SET d.title = $title, d.source = $source,
@@ -364,36 +412,36 @@ def _upsert_document_tx(tx: Any, params: dict) -> None:
     )
 
 
-def _vector_search_entities_tx(tx: Any, params: dict) -> list[dict]:
-    result = tx.run(graph_schema.VECTOR_SEARCH_ENTITIES, **params)
-    return [dict(record) for record in result]
+async def _vector_search_entities_tx(tx: Any, params: dict) -> list[dict]:
+    result = await tx.run(graph_schema.VECTOR_SEARCH_ENTITIES, **params)
+    return await result.data()
 
 
-def _entity_neighbors_chunks_tx(tx: Any, params: dict) -> list[dict]:
-    result = tx.run(graph_schema.ENTITY_NEIGHBORS_AND_CHUNKS, **params)
-    return [dict(record) for record in result]
+async def _entity_neighbors_chunks_tx(tx: Any, params: dict) -> list[dict]:
+    result = await tx.run(graph_schema.ENTITY_NEIGHBORS_AND_CHUNKS, **params)
+    return await result.data()
 
 
-def _fulltext_search_relations_tx(tx: Any, params: dict) -> list[dict]:
-    result = tx.run(graph_schema.FULLTEXT_SEARCH_RELATIONS, **params)
-    return [dict(record) for record in result]
+async def _fulltext_search_relations_tx(tx: Any, params: dict) -> list[dict]:
+    result = await tx.run(graph_schema.FULLTEXT_SEARCH_RELATIONS, **params)
+    return await result.data()
 
 
-def _stats_tx(tx: Any, params: dict) -> list[dict]:
-    result = tx.run(graph_schema.GRAPH_STATS, **params)
-    return [dict(record) for record in result]
+async def _stats_tx(tx: Any, params: dict) -> list[dict]:
+    result = await tx.run(graph_schema.GRAPH_STATS, **params)
+    return await result.data()
 
 
-def _entity_subgraph_tx(tx: Any, params: dict) -> list[dict]:
-    result = tx.run(graph_schema.ENTITY_SUBGRAPH, **params)
-    return [dict(record) for record in result]
+async def _entity_subgraph_tx(tx: Any, params: dict) -> list[dict]:
+    result = await tx.run(graph_schema.ENTITY_SUBGRAPH, **params)
+    return await result.data()
 
 
-def _chunk_graph_tx(tx: Any, params: dict) -> list[dict]:
-    result = tx.run(graph_schema.CHUNK_GRAPH, **params)
-    return [dict(record) for record in result]
+async def _chunk_graph_tx(tx: Any, params: dict) -> list[dict]:
+    result = await tx.run(graph_schema.CHUNK_GRAPH, **params)
+    return await result.data()
 
 
-def _top_entities_tx(tx: Any, params: dict) -> list[dict]:
-    result = tx.run(graph_schema.TOP_ENTITIES, **params)
-    return [dict(record) for record in result]
+async def _top_entities_tx(tx: Any, params: dict) -> list[dict]:
+    result = await tx.run(graph_schema.TOP_ENTITIES, **params)
+    return await result.data()

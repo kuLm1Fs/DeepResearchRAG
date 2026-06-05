@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import sys
@@ -22,7 +23,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from core import configure_logging, get_logger
-from vectorstore import MilvusStore, embed_texts
+from ingestion.indexer import index_articles
 
 configure_logging()
 logger = get_logger(__name__)
@@ -30,7 +31,7 @@ logger = get_logger(__name__)
 QUESTIONS_URL = "https://raw.githubusercontent.com/patronus-ai/financebench/main/data/financebench_open_source.jsonl"
 META_URL = "https://raw.githubusercontent.com/patronus-ai/financebench/main/data/financebench_document_information.jsonl"
 
-BATCH_SIZE = 50
+BATCH_SIZE = 16
 
 
 def download_jsonl(url: str) -> list[dict[str, Any]]:
@@ -57,16 +58,21 @@ def build_records(
         doc_link = doc_meta.get("doc_link", "")
         company = q.get("company", "")
 
-        for ev in q.get("evidence", []):
+        for evidence_index, ev in enumerate(q.get("evidence", [])):
             content = ev.get("evidence_text_full_page", "") or ev.get("evidence_text", "")
             if not content or len(content) < 50:
                 continue
 
-            title = f"{company} {doc_name} - {q['question'][:80]}"
-            content_hash = hashlib.sha256(f"{title}|{content[:500]}".encode()).hexdigest()
+            page_num = ev.get("evidence_page_num", 0)
+            title = f"{company} {doc_name} page {page_num} - {q['question'][:80]}"
+            external_id = f"financebench:{doc_name}:p{page_num}:e{evidence_index}"
+            content_hash = hashlib.sha256(
+                f"{external_id}|{content}".encode()
+            ).hexdigest()
 
             records.append({
                 "title": title,
+                "lead": q["question"],
                 "content": content,
                 "source": "FinanceBench",
                 "language": "en",
@@ -75,23 +81,17 @@ def build_records(
                 "url": doc_link,
                 "content_hash": content_hash,
                 "parent_doc_id": doc_name,
-                "chunk_id": f"{doc_name}:{ev.get('evidence_page_num', 0)}",
+                "external_id": external_id,
             })
 
     return records
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Seed Milvus with FinanceBench data")
-    parser.add_argument("--limit", type=int, default=None, help="Max questions to process")
-    args = parser.parse_args()
-
-    # Download
+async def run(args: argparse.Namespace) -> int:
     questions = download_jsonl(QUESTIONS_URL)
     meta = download_jsonl(META_URL)
     logger.info("downloaded", questions=len(questions), documents=len(meta))
 
-    # Build records
     records = build_records(questions, meta, args.limit)
     logger.info("records_built", count=len(records))
 
@@ -99,20 +99,36 @@ def main() -> int:
         print("No records to insert.")
         return 1
 
-    # Insert into Milvus
-    store = MilvusStore()
-
-    for i in range(0, len(records), BATCH_SIZE):
-        batch = records[i : i + BATCH_SIZE]
-        contents = [r["content"] for r in batch]
-        embeddings = embed_texts(contents)
-        for r, emb in zip(batch, embeddings):
-            r["embedding"] = emb
-        store.insert(batch)
-        logger.info("inserted_batch", batch=i // BATCH_SIZE + 1, count=len(batch))
-
-    print(f"\nDone. Inserted {len(records)} evidence chunks from {len(questions[:args.limit or len(questions)])} questions.")
+    stats = await index_articles(
+        records,
+        batch_size=BATCH_SIZE,
+        build_graph=args.build_graph,
+    )
+    print(
+        "\nDone. "
+        f"Processed {stats['articles']} evidence records, "
+        f"inserted {stats['inserted']} Milvus chunks."
+    )
+    if args.build_graph:
+        print(
+            "Graph build: "
+            f"entities={stats['graph_entities']}, "
+            f"relations={stats['graph_relations']}, "
+            f"errors={stats['graph_errors']}."
+        )
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Seed Milvus with FinanceBench data")
+    parser.add_argument("--limit", type=int, default=None, help="Max questions to process")
+    parser.add_argument(
+        "--build-graph",
+        action="store_true",
+        help="Also build Neo4j GraphRAG nodes/relations from the evidence chunks",
+    )
+    args = parser.parse_args()
+    return asyncio.run(run(args))
 
 
 if __name__ == "__main__":

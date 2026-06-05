@@ -66,16 +66,30 @@ class EvaluateRetrievalTests(unittest.IsolatedAsyncioTestCase):
             {
                 "id": "bc-001",
                 "query": "Compare Apple and Microsoft revenue",
+                "query_type": "comparison",
                 "is_badcase": True,
                 "expected_sources": ["AAPL_2023_10K", "MSFT_2023_10K"],
+                "required_sources": ["AAPL_2023_10K", "MSFT_2023_10K"],
+                "expected_evidence": [
+                    {"source_id": "AAPL_2023_10K", "must_contain": ["revenue"]}
+                ],
                 "source_recall_at_5": 0.5,
+                "required_source_coverage_at_5": 0.5,
+                "evidence_hit_at_5": 0.0,
                 "metrics": eval_script.calculate_metrics(["Business"] * 5, ["Business"]),
             },
             {
                 "id": "gold-001",
                 "query": "Apple revenue",
+                "query_type": "numeric_fact",
                 "expected_sources": ["AAPL_2023_10K"],
+                "required_sources": ["AAPL_2023_10K"],
+                "expected_evidence": [
+                    {"source_id": "AAPL_2023_10K", "must_contain": ["revenue"]}
+                ],
                 "source_recall_at_5": 1.0,
+                "required_source_coverage_at_5": 1.0,
+                "evidence_hit_at_5": 1.0,
                 "metrics": eval_script.calculate_metrics(["Business"] * 5, ["Business"]),
             },
         ]
@@ -86,6 +100,13 @@ class EvaluateRetrievalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["badcase_regression"]["total"], 1)
         self.assertEqual(summary["badcase_regression"]["fixed"], 0)
         self.assertEqual(summary["badcase_regression"]["failed_ids"], ["bc-001"])
+        self.assertEqual(summary["required_source_coverage_at_5"], 0.75)
+        self.assertEqual(summary["evidence_hit_at_5"], 0.5)
+        self.assertEqual(summary["by_query_type"]["comparison"]["queries"], 1)
+        self.assertEqual(
+            summary["by_query_type"]["numeric_fact"]["required_source_coverage_at_5"],
+            1.0,
+        )
         self.assertFalse(eval_script.quality_gate_passed(summary))
 
     async def test_evaluate_semantic_logs_search_errors_and_continues(self):
@@ -115,8 +136,12 @@ class EvaluateRetrievalTests(unittest.IsolatedAsyncioTestCase):
             {
                 "id": "gold-001",
                 "query": "football score",
+                "query_type": "single_source_fact",
                 "expected_categories": ["Sports"],
                 "expected_sources": ["sports-source-1"],
+                "expected_evidence": [
+                    {"source_id": "sports-source-1", "must_contain": ["final score"]}
+                ],
             },
             {"query": "software update", "expected_categories": ["Sci/Tech"]},
         ]
@@ -125,7 +150,11 @@ class EvaluateRetrievalTests(unittest.IsolatedAsyncioTestCase):
             async def retrieve(self, query, top_k):
                 if "football" in query:
                     return [
-                        {"category": "Sports", "source_id": "sports-source-1"},
+                        {
+                            "category": "Sports",
+                            "source_id": "sports-source-1",
+                            "content": "The final score was 2-1.",
+                        },
                         {"category": "Business"},
                     ]
                 return [{"category": "World"}]
@@ -146,6 +175,32 @@ class EvaluateRetrievalTests(unittest.IsolatedAsyncioTestCase):
             0.0,
         )
         self.assertAlmostEqual(result["query_results"][0]["source_recall_at_5"], 1.0)
+        self.assertAlmostEqual(result["query_results"][0]["required_source_coverage_at_5"], 1.0)
+        self.assertAlmostEqual(result["query_results"][0]["evidence_hit_at_5"], 1.0)
+        self.assertAlmostEqual(
+            result["summary"]["by_query_type"]["single_source_fact"]["evidence_hit_at_5"],
+            1.0,
+        )
+
+    def test_run_evaluation_respects_limit_and_no_rerank_args(self):
+        args = eval_script.build_parser().parse_args(
+            ["--queries", "data/eval_financebench.json", "--limit", "25", "--no-rerank"]
+        )
+
+        self.assertEqual(args.limit, 25)
+        self.assertFalse(args.rerank)
+
+    def test_quality_gate_skips_category_precision_when_no_expected_categories(self):
+        summary = {
+            "metrics": {5: {"precision": 0.0}},
+            "category_eval_queries": 0,
+            "source_recall_at_5": 0.98,
+            "required_source_coverage_at_5": 0.98,
+            "evidence_hit_at_5": 0.978,
+            "badcase_regression": {"fix_rate": 1.0},
+        }
+
+        self.assertTrue(eval_script.quality_gate_passed(summary))
 
 
 if __name__ == "__main__":

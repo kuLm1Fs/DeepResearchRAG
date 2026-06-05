@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from core import configure_logging, get_logger
 from eval.datasets import load_eval_cases
+from eval.metrics import evidence_hit_at_k, required_source_coverage_at_k
 from retrieval import MultiPathRetriever
 from vectorstore import MilvusStore, embed_texts_async
 
@@ -34,6 +35,8 @@ K_VALUES = [1, 3, 5, 10]
 BATCH_SIZE = 10
 TARGET_PRECISION_AT_5 = 0.8
 TARGET_SOURCE_RECALL_AT_5 = 0.7
+TARGET_REQUIRED_SOURCE_COVERAGE_AT_5 = 0.85
+TARGET_EVIDENCE_HIT_AT_5 = 0.75
 TARGET_BADCASE_FIX_RATE = 1.0
 
 TEST_QUERIES = [
@@ -179,6 +182,37 @@ def category_precision_at_5(query_results: list[dict[str, Any]]) -> dict[str, fl
     }
 
 
+def query_type_summary(query_results: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for result in query_results:
+        grouped[str(result.get("query_type", "general") or "general")].append(result)
+
+    summary: dict[str, dict[str, float]] = {}
+    for query_type, items in grouped.items():
+        source = [
+            float(item.get("source_recall_at_5", 0.0))
+            for item in items
+            if item.get("expected_sources")
+        ]
+        required = [
+            float(item.get("required_source_coverage_at_5", 0.0))
+            for item in items
+            if item.get("required_sources")
+        ]
+        evidence = [
+            float(item.get("evidence_hit_at_5", 0.0))
+            for item in items
+            if item.get("expected_evidence")
+        ]
+        summary[query_type] = {
+            "queries": len(items),
+            "source_recall_at_5": sum(source) / len(source) if source else 0.0,
+            "required_source_coverage_at_5": sum(required) / len(required) if required else 0.0,
+            "evidence_hit_at_5": sum(evidence) / len(evidence) if evidence else 0.0,
+        }
+    return summary
+
+
 def badcase_regression_summary(
     query_results: list[dict[str, Any]],
     min_source_recall_at_5: float = TARGET_SOURCE_RECALL_AT_5,
@@ -227,21 +261,47 @@ def summarize_results(
         for result in query_results
         if result.get("expected_sources")
     ]
+    required_coverages = [
+        float(result.get("required_source_coverage_at_5", 0.0))
+        for result in query_results
+        if result.get("required_sources")
+    ]
+    evidence_hits = [
+        float(result.get("evidence_hit_at_5", 0.0))
+        for result in query_results
+        if result.get("expected_evidence")
+    ]
+    category_eval_queries = sum(1 for result in query_results if result.get("expected_categories"))
     return {
         "avg_latency_ms": sum(latencies_ms) / len(latencies_ms) if latencies_ms else 0.0,
         "metrics": metrics,
+        "category_eval_queries": category_eval_queries,
         "source_recall_at_5": sum(source_recalls) / len(source_recalls) if source_recalls else 0.0,
+        "required_source_coverage_at_5": (
+            sum(required_coverages) / len(required_coverages) if required_coverages else 0.0
+        ),
+        "evidence_hit_at_5": sum(evidence_hits) / len(evidence_hits) if evidence_hits else 0.0,
         "badcase_regression": badcase_regression_summary(query_results),
         "category_precision_at_5": category_precision_at_5(query_results),
+        "by_query_type": query_type_summary(query_results),
     }
 
 
 def quality_gate_passed(summary: dict[str, Any]) -> bool:
-    precision_ok = summary["metrics"][5]["precision"] >= TARGET_PRECISION_AT_5
+    category_eval_queries = int(summary.get("category_eval_queries", 0) or 0)
+    precision_ok = (
+        True
+        if category_eval_queries == 0
+        else summary["metrics"][5]["precision"] >= TARGET_PRECISION_AT_5
+    )
     source_recall = summary.get("source_recall_at_5", 0.0)
     source_ok = source_recall == 0.0 or source_recall >= TARGET_SOURCE_RECALL_AT_5
+    required_coverage = summary.get("required_source_coverage_at_5", 0.0)
+    required_ok = required_coverage == 0.0 or required_coverage >= TARGET_REQUIRED_SOURCE_COVERAGE_AT_5
+    evidence_hit = summary.get("evidence_hit_at_5", 0.0)
+    evidence_ok = evidence_hit == 0.0 or evidence_hit >= TARGET_EVIDENCE_HIT_AT_5
     badcase_ok = summary.get("badcase_regression", {}).get("fix_rate", 1.0) >= TARGET_BADCASE_FIX_RATE
-    return precision_ok and source_ok and badcase_ok
+    return precision_ok and source_ok and required_ok and evidence_ok and badcase_ok
 
 
 def extract_categories(results: list[dict[str, Any]]) -> list[str]:
@@ -272,6 +332,8 @@ async def evaluate_semantic(
             query = item.get("query", "")
             expected = item.get("expected_categories", [])
             expected_sources = item.get("expected_sources", [])
+            required_sources = item.get("required_sources", expected_sources)
+            expected_evidence = item.get("expected_evidence", [])
             started = time.perf_counter()
 
             try:
@@ -293,14 +355,21 @@ async def evaluate_semantic(
             query_results.append({
                 "query": query,
                 "id": item.get("id", ""),
+                "query_type": item.get("query_type", "general"),
                 "case_type": item.get("case_type", "golden"),
                 "is_badcase": item.get("case_type") == "badcase",
                 "expected_categories": expected,
                 "expected_sources": expected_sources,
+                "required_sources": required_sources,
+                "expected_evidence": expected_evidence,
                 "retrieved_categories": retrieved_categories,
                 "results": raw_results,
                 "metrics": calculate_metrics(retrieved_categories, expected),
                 "source_recall_at_5": source_recall_at_k(raw_results, expected_sources, 5),
+                "required_source_coverage_at_5": required_source_coverage_at_k(
+                    raw_results, required_sources, 5
+                ),
+                "evidence_hit_at_5": evidence_hit_at_k(raw_results, expected_evidence, 5),
                 "latency_ms": latency_ms,
                 **({"error": error} if error else {}),
             })
@@ -327,6 +396,8 @@ async def evaluate_multipath(
             query = item.get("query", "")
             expected = item.get("expected_categories", [])
             expected_sources = item.get("expected_sources", [])
+            required_sources = item.get("required_sources", expected_sources)
+            expected_evidence = item.get("expected_evidence", [])
             started = time.perf_counter()
 
             try:
@@ -345,14 +416,21 @@ async def evaluate_multipath(
             query_results.append({
                 "query": query,
                 "id": item.get("id", ""),
+                "query_type": item.get("query_type", "general"),
                 "case_type": item.get("case_type", "golden"),
                 "is_badcase": item.get("case_type") == "badcase",
                 "expected_categories": expected,
                 "expected_sources": expected_sources,
+                "required_sources": required_sources,
+                "expected_evidence": expected_evidence,
                 "retrieved_categories": retrieved_categories,
                 "results": raw_results,
                 "metrics": calculate_metrics(retrieved_categories, expected),
                 "source_recall_at_5": source_recall_at_k(raw_results, expected_sources, 5),
+                "required_source_coverage_at_5": required_source_coverage_at_k(
+                    raw_results, required_sources, 5
+                ),
+                "evidence_hit_at_5": evidence_hit_at_k(raw_results, expected_evidence, 5),
                 "latency_ms": latency_ms,
                 **({"error": error} if error else {}),
             })
@@ -425,7 +503,7 @@ def print_report(results: dict[str, Any], output_file: Path) -> None:
     print("  RAG 检索质量评估报告")
     print("=" * 60)
     print(f"  测试查询数: {results['total_queries']}")
-    print("  评估维度:   Precision / Recall / NDCG / Source Recall / Badcase")
+    print("  评估维度:   Precision / Recall / NDCG / Source / Evidence / Badcase")
     print("=" * 60)
 
     print_strategy_report("语义检索 (Semantic)", semantic)
@@ -435,8 +513,12 @@ def print_report(results: dict[str, Any], output_file: Path) -> None:
 
     print(f"\n  目标: Precision@5 >= {TARGET_PRECISION_AT_5:.1f}")
     print(f"  目标: Source Recall@5 >= {TARGET_SOURCE_RECALL_AT_5:.1f} (仅含 expected_sources 的样本)")
+    print(f"  目标: Required Source Coverage@5 >= {TARGET_REQUIRED_SOURCE_COVERAGE_AT_5:.2f}")
+    print(f"  目标: Evidence Hit@5 >= {TARGET_EVIDENCE_HIT_AT_5:.2f}")
     print(f"  目标: Badcase Fix Rate >= {TARGET_BADCASE_FIX_RATE:.1f}")
     print(f"  Source Recall@5: {multipath_summary['source_recall_at_5']:.3f}")
+    print(f"  Required Source Coverage@5: {multipath_summary['required_source_coverage_at_5']:.3f}")
+    print(f"  Evidence Hit@5: {multipath_summary['evidence_hit_at_5']:.3f}")
     print(
         f"  Badcase: {badcases['fixed']}/{badcases['total']} fixed "
         f"({badcases['fix_rate']:.1%})"
@@ -450,6 +532,8 @@ async def run_evaluation(args: argparse.Namespace) -> tuple[dict[str, Any], Path
     query_file = resolve_backend_path(args.queries, backend_dir / "data" / "eval_queries.json") if args.queries else None
     output_dir = resolve_backend_path(args.output, backend_dir / "data" / "eval_results")
     test_queries = load_test_queries(query_file)
+    if args.limit is not None:
+        test_queries = test_queries[:args.limit]
 
     logger.info(
         "evaluation_started",
@@ -459,7 +543,7 @@ async def run_evaluation(args: argparse.Namespace) -> tuple[dict[str, Any], Path
     )
 
     store = MilvusStore()
-    retriever = MultiPathRetriever(store)
+    retriever = MultiPathRetriever(store, rerank_enabled=args.rerank)
 
     semantic = await evaluate_semantic(store, test_queries, top_k=max(K_VALUES))
     multipath = await evaluate_multipath(retriever, test_queries, top_k=max(K_VALUES))
@@ -474,6 +558,8 @@ async def run_evaluation(args: argparse.Namespace) -> tuple[dict[str, Any], Path
         "targets": {
             "precision_at_5": TARGET_PRECISION_AT_5,
             "source_recall_at_5": TARGET_SOURCE_RECALL_AT_5,
+            "required_source_coverage_at_5": TARGET_REQUIRED_SOURCE_COVERAGE_AT_5,
+            "evidence_hit_at_5": TARGET_EVIDENCE_HIT_AT_5,
             "badcase_fix_rate": TARGET_BADCASE_FIX_RATE,
         },
         "passed": quality_gate_passed(multipath["summary"]),
@@ -493,6 +579,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Evaluate retrieval quality")
     parser.add_argument("--queries", type=str, default=None, help="Path to test queries JSON file")
     parser.add_argument("--output", type=str, default=None, help="Output directory for results")
+    parser.add_argument("--limit", type=int, default=None, help="Max queries to evaluate")
+    parser.add_argument(
+        "--rerank",
+        dest="rerank",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable cross-encoder reranking for MultiPath results",
+    )
     return parser
 
 
