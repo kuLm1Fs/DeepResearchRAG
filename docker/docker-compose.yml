@@ -141,6 +141,8 @@ services:
       - POSTGRES_PORT=5432
       - POSTGRES_DB=rag_news
       - POSTGRES_USER=rag_user
+      - MCP_INTERNAL_TOKEN=${MCP_INTERNAL_TOKEN:-}
+      - MCP_SHARED_CORPUS=${MCP_SHARED_CORPUS:-false}
     env_file:
       - ../configs/.env.prod
     depends_on:
@@ -159,6 +161,27 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  rag-mcp:
+    container_name: rag-mcp
+    profiles: ["mcp"]
+    build:
+      context: ../rag-mcp
+      dockerfile: Dockerfile
+    command: ["-transport", "http", "-addr", ":8081"]
+    environment:
+      RAG_BACKEND_URL: http://backend:8000
+      MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN:-}
+      MCP_TOKENS: ${MCP_TOKENS:-}
+      RAG_MCP_INGEST_ROOT: /data
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ${RAG_MCP_INGEST_HOST_DIR:-./mcp-ingest}:/data:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
   frontend:
     container_name: rag-frontend

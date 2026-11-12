@@ -125,6 +125,13 @@ class Settings(BaseSettings):
     # Request body
     max_request_body_size: int = 1_048_576  # 1MB
 
+    # MCP internal bridge (called by the rag-mcp Go server, not by browsers)
+    mcp_internal_token: str = ""
+    mcp_max_request_body_size: int = 8_388_608  # 8MB, ingest only
+    # When true, search/get_document may also read rows whose company_id is
+    # empty (the shared corpus seeded by scripts). Never reads other tenants.
+    mcp_shared_corpus: bool = False
+
     @property
     def project_root(self) -> Path:
         return _project_root

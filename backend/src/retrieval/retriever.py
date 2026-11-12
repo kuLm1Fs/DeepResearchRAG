@@ -83,6 +83,11 @@ def build_filter_expr(filters: dict[str, Any] | None) -> str | None:
     allowed_fields = {"language", "category", "source", "user_id", "company_id"}
     clauses = []
     for field, value in filters.items():
+        # An explicit empty company_id means the unscoped shared corpus.
+        # Other empty values still mean "do not filter".
+        if field == "company_id" and value == "":
+            clauses.append('company_id == ""')
+            continue
         if field not in allowed_fields or value is None or value == "":
             continue
         clauses.append(f'{field} == "{escape_milvus_string_value(value)}"')

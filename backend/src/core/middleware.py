@@ -63,7 +63,10 @@ class RequestBodySizeMiddleware(BaseHTTPMiddleware):
         else:
             parsed_content_length = 0
 
-        if parsed_content_length > settings.max_request_body_size:
+        limit = settings.max_request_body_size
+        if request.url.path.startswith("/api/internal/mcp/"):
+            limit = settings.mcp_max_request_body_size
+        if parsed_content_length > limit:
             return JSONResponse(
                 status_code=413,
                 content={"detail": "Request body too large"},
