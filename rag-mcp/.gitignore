@@ -1,0 +1,4 @@
+bin/
+ingest/
+eval/results.json
+.env

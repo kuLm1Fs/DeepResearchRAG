@@ -1,0 +1,16 @@
+services:
+  rag-mcp:
+    build: .
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      RAG_BACKEND_URL: ${RAG_BACKEND_URL:-http://host.docker.internal:8000}
+      MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN:?set MCP_INTERNAL_TOKEN}
+      MCP_TOKENS: ${MCP_TOKENS:?set MCP_TOKENS as token=tenant}
+      RAG_MCP_INGEST_ROOT: /data
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${RAG_MCP_INGEST_HOST_DIR:-./ingest}:/data:ro
+    command: ["-transport", "http", "-addr", ":8081"]

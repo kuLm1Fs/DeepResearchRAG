@@ -20,6 +20,7 @@ from .app import limiter
 from .auth import get_current_user
 from .auth import router as auth_router
 from .graph import router as graph_router
+from .mcp_internal import router as mcp_internal_router
 from .models import (
     Citation,
     FeedbackRequest,
@@ -42,6 +43,7 @@ router = APIRouter()
 router.include_router(auth_router)
 router.include_router(research_router)
 router.include_router(graph_router)
+router.include_router(mcp_internal_router)
 
 
 def build_query_filters(request: QueryRequest, current_user) -> dict[str, Any]:
