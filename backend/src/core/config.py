@@ -112,6 +112,17 @@ class Settings(BaseSettings):
     graph_max_relations_per_chunk: int = 30
     graph_extraction_batch_size: int = 8
 
+    # Retrieval stage switches. Defaults keep the production pipeline intact.
+    # Set any of these to false to drop that stage (used by retrieval ablation).
+    retrieval_vector: bool = True
+    retrieval_bm25: bool = True
+    retrieval_title: bool = True
+    retrieval_rrf: bool = True
+    retrieval_reranker: bool = True
+    retrieval_time_decay: bool = True
+    retrieval_source_weight: bool = True
+    retrieval_graph: bool = True
+
     # Prompt versioning
     prompt_version: str = "v1"
 

@@ -10,6 +10,8 @@ from core.metrics import metrics_registry
 from vectorstore import MilvusStore, embed_texts_async
 
 from .boost import boost_results
+from .cache import RetrievalPathCache
+from .components import RetrievalComponents
 from .fusion import reciprocal_rank_fusion
 from .reranker import CrossEncoderReranker
 
@@ -141,6 +143,8 @@ class MultiPathRetriever:
         graph_retriever: "GraphRetriever | None" = None,
         fault_injector: FaultInjector | None = None,
         degradation_policy: DegradationPolicy | None = None,
+        components: RetrievalComponents | None = None,
+        path_cache: RetrievalPathCache | None = None,
     ):
         self.store = store
         self.semantic_weight = semantic_weight
@@ -157,6 +161,12 @@ class MultiPathRetriever:
         self.graph_retriever = graph_retriever
         self.fault_injector = fault_injector or FaultInjector()
         self.degradation_policy = degradation_policy or DegradationPolicy()
+        # None keeps the historical path (all stages on). An explicit mask
+        # is how ablation and retrieval_* settings turn stages off.
+        self.components = components
+        self.path_cache = path_cache
+        self.last_retrieval_latency_ms = 0.0
+        self._path_latency_ms: dict[str, float] = {}
 
     async def retrieve(
         self,
@@ -189,6 +199,17 @@ class MultiPathRetriever:
         started = time.perf_counter()
         try:
             filter_expr = build_filter_expr(filters)
+
+            if self.components is not None:
+                final_results = await self._run_configured(
+                    query,
+                    top_k=top_k,
+                    filters=filters,
+                    strategy=strategy,
+                    filter_expr=filter_expr,
+                )
+                self._record_retrieval_success(query, strategy, started, final_results)
+                return final_results
 
             # Strategy dispatch. "vector" runs only the three Milvus
             # paths; "graph" runs only the graph path; "hybrid" runs all
@@ -307,12 +328,200 @@ class MultiPathRetriever:
             )
             raise RetrievalError(f"Retrieval failed: {e}")
 
+    def _record_retrieval_success(
+        self,
+        query: str,
+        strategy: str,
+        started: float,
+        final_results: list[dict[str, Any]],
+    ) -> None:
+        logger.info("retrieval_completed", query=query, result_count=len(final_results))
+        metrics_registry.observe(
+            "rag_retrieval_latency_seconds",
+            time.perf_counter() - started,
+            labels={"strategy": strategy, "status": "success"},
+        )
+        metrics_registry.set_gauge(
+            "rag_retrieval_results_count",
+            len(final_results),
+            labels={"strategy": strategy},
+        )
+
+    async def _run_configured(
+        self,
+        query: str,
+        top_k: int,
+        filters: dict[str, Any] | None,
+        strategy: str,
+        filter_expr: str | None,
+    ) -> list[dict[str, Any]]:
+        """Run only the stages selected by ``self.components``."""
+        components = self.components
+        assert components is not None
+        self._path_latency_ms = {}
+
+        run_vector = strategy != "graph" and components.vector
+        run_bm25 = strategy != "graph" and components.bm25
+        run_title = strategy != "graph" and components.title
+        run_graph = (
+            strategy != "vector"
+            and self.graph_retriever is not None
+            and components.graph
+        )
+
+        tasks = []
+        names: list[str] = []
+        if run_vector:
+            tasks.append(self._semantic_search(query, filter_expr=filter_expr))
+            names.append("vector")
+        if run_bm25:
+            tasks.append(self._keyword_search(query, filter_expr=filter_expr))
+            names.append("bm25")
+        if run_title:
+            tasks.append(self._title_match(query, filter_expr=filter_expr))
+            names.append("title")
+        if run_graph:
+            tasks.append(self._graph_search(query))
+            names.append("graph")
+
+        gathered = await asyncio.gather(*tasks) if tasks else []
+        by_name = dict(zip(names, gathered))
+        semantic_results = by_name.get("vector", [])
+        keyword_results = by_name.get("bm25", [])
+        title_results = by_name.get("title", [])
+        graph_results = by_name.get("graph", [])
+
+        if filters:
+            if run_vector:
+                semantic_results = self._apply_filters(semantic_results, filters)
+            if run_bm25:
+                keyword_results = self._apply_filters(keyword_results, filters)
+            if run_title:
+                title_results = self._apply_filters(title_results, filters)
+
+        logger.info(
+            "paths_completed",
+            semantic_count=len(semantic_results),
+            keyword_count=len(keyword_results),
+            title_count=len(title_results),
+            graph_count=len(graph_results),
+            strategy=strategy,
+            components=components.as_dict(),
+        )
+
+        post_started = time.perf_counter()
+        fused = self._fuse_configured(
+            semantic_results,
+            keyword_results,
+            title_results,
+            graph_results,
+            run_vector=run_vector,
+            run_bm25=run_bm25,
+            run_title=run_title,
+            run_graph=run_graph,
+        )
+        if components.time_decay or components.source_weight:
+            ranked = boost_results(
+                fused,
+                use_time_decay=components.time_decay,
+                use_source_quality=components.source_weight,
+                time_weight=0.3,
+                source_weight=0.2,
+            )
+        else:
+            ranked = fused
+
+        if components.reranker:
+            candidate_limit = max(top_k, top_k * self.rerank_candidate_multiplier)
+            final_results = self.reranker.rerank(query, ranked[:candidate_limit], top_k)
+        else:
+            final_results = ranked[:top_k]
+
+        post_ms = (time.perf_counter() - post_started) * 1000
+        path_times = [self._path_latency_ms[name] for name in names if name in self._path_latency_ms]
+        parallel_ms = max(path_times) if path_times else 0.0
+        self.last_retrieval_latency_ms = parallel_ms + post_ms
+        return final_results
+
+    def _fuse_configured(
+        self,
+        semantic_results: list[dict[str, Any]],
+        keyword_results: list[dict[str, Any]],
+        title_results: list[dict[str, Any]],
+        graph_results: list[dict[str, Any]],
+        *,
+        run_vector: bool,
+        run_bm25: bool,
+        run_title: bool,
+        run_graph: bool,
+    ) -> list[dict[str, Any]]:
+        components = self.components
+        assert components is not None
+        lists: list[list[dict[str, Any]]] = []
+        weights: list[float] = []
+        if run_vector:
+            lists.append(semantic_results)
+            weights.append(self.semantic_weight)
+        if run_bm25:
+            lists.append(keyword_results)
+            weights.append(self.keyword_weight)
+        if run_title:
+            lists.append(title_results)
+            weights.append(self.title_weight)
+        if run_graph:
+            lists.append(graph_results)
+            weights.append(self.graph_weight)
+        if not lists:
+            return []
+        if components.rrf and len(lists) > 1:
+            return reciprocal_rank_fusion(lists, weights=weights, k=60)
+        if len(lists) == 1:
+            return [dict(doc) for doc in lists[0]]
+        return concatenate_ranked(lists)
+
+    def _cached_path(
+        self,
+        path: str,
+        query: str,
+        filter_expr: str | None,
+        limit: int,
+    ) -> list[dict[str, Any]] | None:
+        if self.path_cache is None:
+            return None
+        hit = self.path_cache.get(path, query, filter_expr, limit)
+        if hit is None:
+            return None
+        results, latency_ms = hit
+        self._path_latency_ms[path] = latency_ms
+        return results
+
+    def _remember_path(
+        self,
+        path: str,
+        query: str,
+        filter_expr: str | None,
+        limit: int,
+        results: list[dict[str, Any]],
+        started: float,
+    ) -> None:
+        latency_ms = (time.perf_counter() - started) * 1000
+        self._path_latency_ms[path] = latency_ms
+        if self.path_cache is None:
+            return
+        try:
+            self.path_cache.put(path, query, filter_expr, limit, results, latency_ms)
+        except OSError:
+            logger.warning("retrieval_path_cache_write_failed", path=path)
+
     async def _semantic_search(
         self,
         query: str,
         filter_expr: str | None = None,
     ) -> list[dict[str, Any]]:
         """Vector similarity search."""
+        cached = self._cached_path("vector", query, filter_expr, self.semantic_limit)
+        if cached is not None:
+            return cached
         try:
             started = time.perf_counter()
             self.fault_injector.maybe_raise("embedding")
@@ -324,10 +533,12 @@ class MultiPathRetriever:
                 expr=filter_expr,
             )
             self._record_path_metrics("semantic", started, len(results), "success")
+            self._remember_path("vector", query, filter_expr, self.semantic_limit, results, started)
             return results
         except Exception as e:
             logger.warning("semantic_search_failed", error=str(e))
             self._record_path_metrics("semantic", started, 0, "error")
+            self._path_latency_ms["vector"] = (time.perf_counter() - started) * 1000
             if _fault_component(e) == "milvus":
                 raise
             return []
@@ -337,30 +548,37 @@ class MultiPathRetriever:
         query: str,
         filter_expr: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Keyword/fulltext search on title and content."""
+        """Keyword/fulltext search on title and content.
+
+        Ablation calls this path ``bm25``. It is the repository's Milvus
+        LIKE query, not a separate BM25 scorer.
+        """
+        cached = self._cached_path("bm25", query, filter_expr, self.keyword_limit)
+        if cached is not None:
+            return cached
         try:
             started = time.perf_counter()
             self.fault_injector.maybe_raise("milvus")
             like_expr = build_like_expr(["title", "content"], query)
             if not like_expr:
                 self._record_path_metrics("keyword", started, 0, "success")
+                self._remember_path("bm25", query, filter_expr, self.keyword_limit, [], started)
                 return []
             expr = combine_expr(like_expr, filter_expr)
             results = await self.store.query_async(
                 expr=expr,
-                output_fields=[
-                    "title", "content", "source", "language", "category", "published_at",
-                    "content_hash", "id", "user_id", "company_id", "url",
-                ],
+                output_fields=list(_PATH_OUTPUT_FIELDS),
                 limit=self.keyword_limit,
             )
             for r in results:
                 r["score"] = 0.5
             self._record_path_metrics("keyword", started, len(results), "success")
+            self._remember_path("bm25", query, filter_expr, self.keyword_limit, results, started)
             return results
         except Exception as e:
             logger.warning("keyword_search_failed", error=str(e))
             self._record_path_metrics("keyword", started, 0, "error")
+            self._path_latency_ms["bm25"] = (time.perf_counter() - started) * 1000
             if _fault_component(e) == "milvus":
                 raise
             return []
@@ -371,29 +589,32 @@ class MultiPathRetriever:
         filter_expr: str | None = None,
     ) -> list[dict[str, Any]]:
         """Exact title matching."""
+        cached = self._cached_path("title", query, filter_expr, self.title_limit)
+        if cached is not None:
+            return cached
         try:
             started = time.perf_counter()
             self.fault_injector.maybe_raise("milvus")
             like_expr = build_like_expr(["title"], query)
             if not like_expr:
                 self._record_path_metrics("title", started, 0, "success")
+                self._remember_path("title", query, filter_expr, self.title_limit, [], started)
                 return []
             expr = combine_expr(like_expr, filter_expr)
             results = await self.store.query_async(
                 expr=expr,
-                output_fields=[
-                    "title", "content", "source", "language", "category", "published_at",
-                    "content_hash", "id", "user_id", "company_id", "url",
-                ],
+                output_fields=list(_PATH_OUTPUT_FIELDS),
                 limit=self.title_limit,
             )
             for r in results:
                 r["score"] = 0.8
             self._record_path_metrics("title", started, len(results), "success")
+            self._remember_path("title", query, filter_expr, self.title_limit, results, started)
             return results
         except Exception as e:
             logger.warning("title_match_failed", error=str(e))
             self._record_path_metrics("title", started, 0, "error")
+            self._path_latency_ms["title"] = (time.perf_counter() - started) * 1000
             if _fault_component(e) == "milvus":
                 raise
             return []
@@ -418,10 +639,12 @@ class MultiPathRetriever:
             self.fault_injector.maybe_raise("graph")
             results = await self.graph_retriever.retrieve(query, top_k=self.graph_limit)
             self._record_path_metrics("graph", started, len(results), "success")
+            self._path_latency_ms["graph"] = (time.perf_counter() - started) * 1000
             return results
         except Exception as e:
             logger.warning("graph_search_failed", error=str(e), error_type=type(e).__name__)
             self._record_path_metrics("graph", started, 0, "error")
+            self._path_latency_ms["graph"] = (time.perf_counter() - started) * 1000
             reason = _fault_scenario(e) or type(e).__name__
             self.degradation_policy.decide(
                 component="graph",
@@ -471,6 +694,35 @@ class MultiPathRetriever:
                     continue
             filtered.append(r)
         return filtered
+
+
+_PATH_OUTPUT_FIELDS = [
+    "title", "content", "source", "language", "category", "published_at",
+    "content_hash", "id", "user_id", "company_id", "url",
+    "chunk_id", "parent_doc_id", "external_id",
+]
+
+
+def _doc_key(doc: dict[str, Any], fallback: str) -> str:
+    for field in ("content_hash", "chunk_id", "id"):
+        value = doc.get(field)
+        if value not in (None, ""):
+            return f"{field}:{value}"
+    return fallback
+
+
+def concatenate_ranked(result_lists: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Keep the first occurrence of each document, in path-then-rank order."""
+    fused: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for list_index, result_list in enumerate(result_lists):
+        for rank, doc in enumerate(result_list):
+            key = _doc_key(doc, f"anon:{list_index}:{rank}")
+            if key in seen:
+                continue
+            seen.add(key)
+            fused.append(dict(doc))
+    return fused
 
 
 def _fault_component(exc: Exception) -> str | None:

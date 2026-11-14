@@ -1,4 +1,6 @@
 from .boost import boost_results, calculate_source_quality, calculate_time_decay
+from .cache import RetrievalPathCache
+from .components import ABLATION_PRESETS, RetrievalComponents, parse_ablation_configs
 from .fusion import fusion
 from .graph_retriever import GraphRetriever
 from .reranker import CrossEncoderReranker
@@ -13,4 +15,8 @@ __all__ = [
     "calculate_source_quality",
     "CrossEncoderReranker",
     "GraphRetriever",
+    "RetrievalComponents",
+    "RetrievalPathCache",
+    "ABLATION_PRESETS",
+    "parse_ablation_configs",
 ]

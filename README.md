@@ -303,6 +303,34 @@ PYTHONPATH=src python scripts/evaluate_e2e.py --limit 5
 # 目标: keyword_hit_rate >= 0.7, faithfulness >= 3.5, relevance >= 3.5
 ```
 
+### 检索消融（FinanceBench）
+
+先启动 Milvus，把 FinanceBench 证据写入库，并在 `backend/configs/.env.dev` 里配好向量路径要用的 key（`VOLCENGINE_API_KEY`、`MILVUS_HOST`、`MILVUS_PORT`）。问题集用仓库里的 `backend/data/eval_financebench.json`，不用另下。
+
+```bash
+cd docker
+docker compose up -d milvus-etcd milvus-minio milvus-standalone
+cd ../backend
+PYTHONPATH=src python scripts/seed_financebench.py
+PYTHONPATH=src python scripts/ablation.py
+```
+
+只跑前几题，或只跑其中几档：
+
+```bash
+PYTHONPATH=src python scripts/ablation.py --limit 5
+PYTHONPATH=src python scripts/ablation.py --configs vector,bm25,vector_bm25,full
+```
+
+终端会打印表格，同一份结果写在 `backend/data/eval_results/ablation/<时间戳>/`：
+
+- `results.md`：各配置的 Hit@1、Hit@3、Hit@5、Recall@5、MRR@10、nDCG@10、平均检索延迟，以及相对 vector only 的差值
+- `results.json`、`results.csv`：同一批数
+
+Hit@K 是前 K 条里有没有命中标注证据；Recall@5 是前 5 条盖住的证据条数占该题证据条数的比例。差值为正表示比纯向量高，延迟差为正表示更慢。`bm25` 这一档是现有的关键词全文路径（对 title/content 做 Milvus 查询），不是单独的 BM25 打分器。`full` 含三路召回、RRF、时间衰减、来源加权和 reranker，不含 Neo4j。报告里的 `rerank=lexical_fallback` 表示 CrossEncoder 权重没加载，走了词面兜底。
+
+各路召回会缓存在 `backend/data/eval_results/ablation_cache/`，重跑会复用首次实测延迟。关掉缓存加 `--no-cache`。默认检索全开；只有把 `RETRIEVAL_VECTOR`、`RETRIEVAL_BM25`、`RETRIEVAL_TITLE`、`RETRIEVAL_RRF`、`RETRIEVAL_RERANKER`、`RETRIEVAL_TIME_DECAY`、`RETRIEVAL_SOURCE_WEIGHT` 或 `RETRIEVAL_GRAPH` 设为 `false` 才会关掉对应环节。
+
 ## Prompt 管理
 
 Prompt 模板位于 `backend/src/agent/templates/`，按版本目录管理（`v1/`、`v2/`），通过 `current` 软链接指向当前版本。运行时通过 `PROMPT_VERSION` 环境变量选择。
