@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import statistics
 import re
+import statistics
 from collections.abc import Iterable
 from typing import Any
 
@@ -131,6 +131,65 @@ def _result_text(result: dict[str, Any]) -> str:
     return " ".join(str(result.get(field, "")) for field in fields).lower()
 
 
+def _evidence_matches(result: dict[str, Any], evidence: dict[str, Any]) -> bool:
+    """Same constraints as ``evidence_hit_at_k`` for a single result/spec pair."""
+    source_id = str(evidence.get("source_id", "") or "")
+    chunk_id = str(evidence.get("chunk_id", "") or "")
+    terms = [str(term).lower() for term in evidence.get("must_contain", []) if str(term)]
+    section = str(evidence.get("section", "") or "").lower()
+
+    if source_id and not _matches_source(result, source_id):
+        return False
+    text = _result_text(result)
+    if section and section not in text:
+        return False
+    chunk_ok = bool(chunk_id) and _matches_chunk_id(result, chunk_id)
+    terms_ok = bool(terms) and all(term in text for term in terms)
+    return chunk_ok or terms_ok or (not chunk_id and not terms)
+
+
+def evidence_gains(
+    results: list[dict[str, Any]],
+    expected_evidence: list[dict[str, Any]],
+) -> list[int]:
+    """How many still-unmatched evidence specs each result newly covers.
+
+    The total of the gains equals the number of evidence specs matched by
+    ``evidence_hit_at_k``. A result that covers two specs gets a gain of 2.
+    """
+    gains = [0] * len(results)
+    if not expected_evidence:
+        return gains
+
+    unmatched = set(range(len(expected_evidence)))
+    for index, result in enumerate(results):
+        claimed = [
+            ev_index
+            for ev_index in unmatched
+            if _evidence_matches(result, expected_evidence[ev_index])
+        ]
+        for ev_index in claimed:
+            unmatched.discard(ev_index)
+        gains[index] = len(claimed)
+    return gains
+
+
+def source_gains(results: list[dict[str, Any]], expected_sources: list[str]) -> list[int]:
+    """How many still-unmatched expected sources each result newly covers."""
+    gains = [0] * len(results)
+    unmatched = {index for index, source in enumerate(expected_sources) if source}
+    for index, result in enumerate(results):
+        claimed = [
+            source_index
+            for source_index in unmatched
+            if _matches_source(result, expected_sources[source_index])
+        ]
+        for source_index in claimed:
+            unmatched.discard(source_index)
+        gains[index] = len(claimed)
+    return gains
+
+
 def evidence_hit_at_k(
     results: list[dict[str, Any]],
     expected_evidence: list[dict[str, Any]],
@@ -144,28 +203,7 @@ def evidence_hit_at_k(
     """
     if not expected_evidence or k <= 0:
         return 0.0
-
-    top_results = results[:k]
-    hits = 0
-    for evidence in expected_evidence:
-        source_id = str(evidence.get("source_id", "") or "")
-        chunk_id = str(evidence.get("chunk_id", "") or "")
-        terms = [str(term).lower() for term in evidence.get("must_contain", []) if str(term)]
-        section = str(evidence.get("section", "") or "").lower()
-
-        for result in top_results:
-            if source_id and not _matches_source(result, source_id):
-                continue
-            text = _result_text(result)
-            if section and section not in text:
-                continue
-            chunk_ok = bool(chunk_id) and _matches_chunk_id(result, chunk_id)
-            terms_ok = bool(terms) and all(term in text for term in terms)
-            if chunk_ok or terms_ok or (not chunk_id and not terms):
-                hits += 1
-                break
-
-    return hits / len(expected_evidence)
+    return sum(evidence_gains(results[:k], expected_evidence)) / len(expected_evidence)
 
 
 def _number_patterns(value: Any) -> list[str]:

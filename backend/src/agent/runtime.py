@@ -62,15 +62,23 @@ class AgentRuntime:
 
     def create_retriever(self):
         from retrieval import MultiPathRetriever
+        from retrieval.components import RetrievalComponents
         from vectorstore import MilvusStore
 
         graph_retriever = self.create_graph_retriever()
+        # Only pass an explicit component mask when a stage is turned off.
+        # The all-on default keeps the historical retrieve() path.
+        components = RetrievalComponents.from_settings(self.config)
+        extra: dict[str, Any] = {}
+        if components != RetrievalComponents():
+            extra["components"] = components
         return MultiPathRetriever(
             MilvusStore(),
             graph_retriever=graph_retriever,
             fault_injector=self.fault_injector,
             degradation_policy=self.degradation_policy
             or DegradationPolicy.from_settings(self.config),
+            **extra,
         )
 
     def create_graph_retriever(self):
